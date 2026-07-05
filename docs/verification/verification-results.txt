@@ -1,0 +1,90 @@
+﻿
+Status Expect  Claim                                                             Detail                                                     
+------ ------  -----                                                             ------                                                     
+PASS   Present v1 has .dict()                                                    line 450: def dict(                                        
+PASS   Present v1 has .json()                                                    line 484: def json(                                        
+PASS   Present v1 has .parse_obj()                                               line 541: def parse_obj(cls: Type['Model'], obj: Any) ->   
+                                                                                 'Model':                                                   
+PASS   Present v1 has .parse_raw()                                               line 552: def parse_raw(                                   
+PASS   Present v1 has .parse_file()                                              line 575: def parse_file(                                  
+PASS   Present v1 has .from_orm()                                                line 595: def from_orm(cls: Type['Model'], obj: Any) ->    
+                                                                                 'Model':                                                   
+PASS   Present v1 has .construct()                                               line 609: def construct(cls: Type['Model'], _fields_set:   
+                                                                                 Optional['SetStr'] = None, **valu...                       
+PASS   Present v1 has .copy()                                                    line 650: def copy(                                        
+PASS   Present v1 has .schema()  <-- the corrected row                           line 683: def schema(cls, by_alias: bool = True,           
+                                                                                 ref_template: str = default_ref_template)...               
+PASS   Present v1 has .schema_json()                                             line 692: def schema_json(                                 
+PASS   Absent  v1 does NOT have .json_schema() <-- my flagged error              not found                                                  
+PASS   Present v1 has .update_forward_refs()                                     line 833: def update_forward_refs(cls, **localns: Any) ->  
+                                                                                 None:                                                      
+PASS   Present v1 has __fields__                                                 line 139: fields.update(smart_deepcopy(base.__fields__))   
+PASS   Present v2 has model_dump()                                               line 427: def model_dump(                                  
+PASS   Present v2 has model_dump_json()                                          line 493: def model_dump_json(                             
+PASS   Present v2 has model_validate()                                           line 694: def model_validate(                              
+PASS   Present v2 has model_validate_json()                                      line 743: def model_validate_json(                         
+PASS   Present v2 has model_construct()                                          line 317: def model_construct(cls, _fields_set: set[str] | 
+                                                                                 None = None, **values: Any) -> ...                         
+PASS   Present v2 has model_copy()                                               line 393: def model_copy(self, *, update: Mapping[str,     
+                                                                                 Any] | None = None, deep: bool = Fa...                     
+PASS   Present v2 has model_json_schema()                                        line 562: def model_json_schema(                           
+PASS   Present v2 has model_rebuild()                                            line 633: def model_rebuild(                               
+PASS   Present v2 has model_fields                                               line 277: def model_fields(cls) -> dict[str, FieldInfo]:   
+FAIL   Absent  v2 main.py has NO def dict( (old name gone from BaseModel proper) line 1323: def dict(  # noqa: D102                         
+PASS   Present v2 has RootModel class                                            line 32: class RootModel(BaseModel,                        
+                                                                                 Generic[RootModelRootType], metaclass=_RootModelMetacl...  
+PASS   Present v2 has TypeAdapter class                                          line 70: class TypeAdapter(Generic[T]):                    
+FAIL   Present v1 supports __root__                                              not found                                                  
+PASS   Present v1 has @validator                                                 line 52: def validator(                                    
+PASS   Present v1 has @root_validator                                            line 108: def root_validator(_func: AnyCallable) ->        
+                                                                                 'AnyClassMethod':                                          
+PASS   Present v2 has @field_validator                                           line 378: def field_validator(                             
+PASS   Present v2 has @model_validator                                           line 642: def model_validator(                             
+PASS   Present v2 has @validate_call                                             line 73: def validate_call(                                
+PASS   Present v1 has @validate_arguments                                        line 21: def validate_arguments(func: None = None, *,      
+                                                                                 config: 'ConfigType' = None) -> Call...                    
+PASS   Present v2 keeps deprecated @validator in deprecated/                     line 82: def validator(                                    
+PASS   Present v1 config: allow_population_by_field_name                         line 56: allow_population_by_field_name: bool              
+PASS   Present v1 config: anystr_lower                                           line 48: anystr_lower: bool                                
+PASS   Present v1 config: anystr_strip_whitespace                                line 49: anystr_strip_whitespace: bool                     
+PASS   Present v1 config: orm_mode                                               line 62: orm_mode: bool                                    
+PASS   Present v1 config: schema_extra                                           line 66: schema_extra: Union[Dict[str, object],            
+                                                                                 'SchemaExtraCallable']                                     
+PASS   Present v1 config: allow_mutation                                         line 54: allow_mutation: bool                              
+PASS   Present v1 config: smart_union                                            line 113: smart_union: bool = False                        
+PASS   Present v2 config: populate_by_name                                       line 189: populate_by_name: bool                           
+PASS   Present v2 config: str_to_lower                                           line 48: str_to_lower: bool                                
+PASS   Present v2 config: str_strip_whitespace                                   line 54: str_strip_whitespace: bool                        
+PASS   Present v2 config: from_attributes                                        line 374: from_attributes: bool                            
+PASS   Present v2 config: json_schema_extra                                      line 451: json_schema_extra: JsonDict |                    
+                                                                                 JsonSchemaExtraCallable | None                             
+PASS   Present v2 config: validate_default                                       line 234: If you have an `Optional[Enum]` value that you   
+                                                                                 set a default for, you need to us...                       
+PASS   Present v2 config: frozen                                                 line 179: frozen: bool                                     
+PASS   Absent  v2 config does NOT have orm_mode key                              not found                                                  
+PASS   Present v1 Field: min_items                                               line 120: 'min_items',                                     
+PASS   Present v1 Field: regex                                                   line 127: 'regex',                                         
+PASS   Present v2 Field: pattern                                                 line 74: pattern: str | re.Pattern[str] | None             
+PASS   Present v2 Field: min_length                                              line 72: min_length: int | None                            
+PASS   Present v2 Field: validate_default                                        line 83: validate_default: bool | None                     
+PASS   Present v1 has ConstrainedInt                                             line 202: class ConstrainedInt(int,                        
+                                                                                 metaclass=ConstrainedNumberMeta):                          
+PASS   Present v1 has ConstrainedStr                                             line 405: class ConstrainedStr(str):                       
+PASS   Present v2 has StringConstraints                                          line 103: 'StringConstraints',                             
+PASS   Absent  v2 types.py has NO ConstrainedInt class                           not found                                                  
+PASS   Present v1 utils has to_camel                                             line 314: def to_camel(string: str) -> str:                
+PASS   Present v1 utils has to_lower_camel                                       line 318: def to_lower_camel(string: str) -> str:          
+PASS   Present v2 alias_generators has to_pascal                                 line 12: def to_pascal(snake: str) -> str:                 
+PASS   Present v2 alias_generators has to_camel                                  line 25: def to_camel(snake: str) -> str:                  
+PASS   Present v1 has PyObject                                                   line 74: 'PyObject',                                       
+PASS   Present v2 has ImportString                                               line 53: 'ImportString',                                   
+PASS   Present v1 has BaseSettings in-package                                    line 23: class BaseSettings(BaseModel):                    
+PASS   Present v1 has GenericModel                                               line 64: class GenericModel(BaseModel):                    
+PASS   Present v1 has stricturl                                                  line 554: def stricturl(                                   
+PASS   Present v1 has ErrorWrapper                                               line 28: class ErrorWrapper(Representation):               
+PASS   Present v1 errors.py has the exception zoo (MissingError)                 line 145: class MissingError(PydanticValueError):          
+PASS   Absent  v2 errors.py has NO MissingError class                            not found                                                  
+
+
+
+SUMMARY: 67 PASS / 2 FAIL / 0 FILE MISSING (of 69 checks)

@@ -1,0 +1,8 @@
+pydantic/
+pydantic-v1/
+pydantic-v2/
+.env
+__pycache__/
+qdrant_storage/
+.venv/
+.vadavenv/
