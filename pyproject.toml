@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "ipykernel>=7.3.0",
     "langfuse>=4.13.0",
     "openai>=2.44.0",
     "pydantic>=2.13.4",
