@@ -4,8 +4,16 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 from schema import Chunk
+import math
+load_dotenv()
+
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance, PointStruct
+import uuid
 
 PROJECT_ROOT = Path(__file__).parents[1] # ....\version-aware-document-assistant
+
+COLLECTION_NAME = "pydantic-knowledge-base"
 
 INCLUDE = [
     ("pydantic-v1", "v1", "docs/examples/*.py"),
@@ -41,7 +49,7 @@ def load_paths():
     for root, vers, pattern in INCLUDE:
         matches = sorted((PROJECT_ROOT/root).glob(pattern))
         if not matches:
-            raise FileNotFoundError(f"{root}/{pattern} is not in-line with corpse map. please check again.")
+            raise FileNotFoundError(f"{root}/{pattern} is not in-line with corpus map. please check again.")
         kept = 0
         for f in matches:
             if f.name == "__init__.py":
@@ -111,39 +119,97 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
     
     return chunk_list
 
+def _get_client():
+    return OpenAI()
+
+def embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
+    results = []
+    batch_count = math.ceil(len(chunks)/100)
+    client =_get_client()
+    for i in range(0, len(chunks), 100):
+        batch = chunks[i:i+100]
+        text_batch = [c.text for c in batch]
+        print(f"PROGRESS {i//100 + 1}/{batch_count}")
+        print(f"CHUNKS to EMBEDDINGS {len(batch)} out of {len(chunks)}")
+        response = client.embeddings.create(
+            input=text_batch,
+            model="text-embedding-3-small"
+        )
+        for j, item in enumerate(response.data):
+            assert item.index == j
+        results.extend(item.embedding for item in response.data)
+    
+    assert len(results) == len(chunks), f"{len(results)} vectors != {len(chunks)} chunks"
+    return results
+
+def upsert_chunks(chunks: list[Chunk], vectors: list[list[float]]) -> None:
+    list_of_pointstructs = []
+    assert len(chunks) == len(vectors), f"{len(chunks)} chunks != {len(vectors)} vectors"
+
+    client = QdrantClient(url="http://localhost:6333")
+    if not client.collection_exists(COLLECTION_NAME):
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
+        )
+
+    for i, c in enumerate(chunks):
+        list_of_pointstructs.append(PointStruct(
+            id=str(uuid.uuid5(uuid.NAMESPACE_URL, c.id)),
+            vector=vectors[i],
+            payload=c.model_dump()
+        ))
+    
+    for i in range(0, len(list_of_pointstructs), 100):
+        client.upsert(
+            collection_name=COLLECTION_NAME,
+            points=list_of_pointstructs[i:i+100],
+            wait=True
+        )
+        print(f"Upsert batch {i//100 + 1}/{math.ceil(len(list_of_pointstructs)/100)}")
+    server_count = client.count(collection_name=COLLECTION_NAME, exact=True).count
+
+    print(f"points in collection: {server_count}")
+    assert server_count == len(chunks), f"server has {server_count}, expected {len(chunks)}"
+
 def main():    
     loaded_files = load_paths()
     print(f"Total files = {len(loaded_files)}")
     # print(loaded_files)
     chunks = chunk_file(loaded_files=loaded_files)
-    from collections import Counter
+    # from collections import Counter
 
-    # --- per-version counts ---
-    print(f"TOTAL CHUNKS: {len(chunks)}")
-    print("Per-version:", Counter(c.version for c in chunks))
-    print("Per-type:   ", Counter(c.chunk_type for c in chunks))
+    # # --- per-version counts ---
+    # print(f"TOTAL CHUNKS: {len(chunks)}")
+    # print("Per-version:", Counter(c.version for c in chunks))
+    # print("Per-type:   ", Counter(c.chunk_type for c in chunks))
 
-    # --- eyeball: one migration chunk (verify version='both') ---
-    mig = [c for c in chunks if c.source_file == "docs/migration.md"]
-    print(f"\nmigration.md chunks: {len(mig)}")
-    print(f"sample -> id={mig[0].id}  version={mig[0].version}")
-    print(mig[0].text[:400])
+    # # --- eyeball: one migration chunk (verify version='both') ---
+    # mig = [c for c in chunks if c.source_file == "docs/migration.md"]
+    # print(f"\nmigration.md chunks: {len(mig)}")
+    # print(f"sample -> id={mig[0].id}  version={mig[0].version}")
+    # print(mig[0].text[:400])
 
-    # --- eyeball: one v2 main.py chunk (see the ugly split) ---
-    mainpy = [c for c in chunks if c.source_file == "pydantic/main.py" and c.version == "v2"]
-    print(f"\nv2 main.py chunks: {len(mainpy)}")
-    print(mainpy[len(mainpy)//2].text[:600])   # middle of the file, mid-function odds high
+    # # --- eyeball: one v2 main.py chunk (see the ugly split) ---
+    # mainpy = [c for c in chunks if c.source_file == "pydantic/main.py" and c.version == "v2"]
+    # print(f"\nv2 main.py chunks: {len(mainpy)}")
+    # print(mainpy[len(mainpy)//2].text[:600])   # middle of the file, mid-function odds high
 
-    # --- eyeball: adjacent-chunk overlap check ---
-    a, b = mig[0], mig[1]
-    print("overlap ok:", a.text[-200:] == b.text[:200])
-    print(f"\noverlap check: {a.id} tail == {b.id} head ?")
-    print("TAIL:", repr(a.text[-100:]))
-    print("HEAD:", repr(b.text[:100]))
+    # # --- eyeball: adjacent-chunk overlap check ---
+    # a, b = mig[0], mig[1]
+    # print("overlap ok:", a.text[-200:] == b.text[:200])
+    # print(f"\noverlap check: {a.id} tail == {b.id} head ?")
+    # print("TAIL:", repr(a.text[-100:]))
+    # print("HEAD:", repr(b.text[:100]))
     # for i in range(0, 4):
     #     print(chunks[i])
     #     print("\n"+"*"*30+"\n")
     print(f"TOTAL CHUNKS: {len(chunks)}")
+    embed_list = embed_chunks(chunks=chunks)
+    print(f"vectors: {len(embed_list)}, dims: {len(embed_list[0])}")
+
+    print("PERFORMING Qdrant operations. UPSERT")
+    upsert_chunks(chunks=chunks, vectors=embed_list)
 
 if __name__ =="__main__":
     main()
