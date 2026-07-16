@@ -4,6 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 from schema import Chunk
+from config import COLLECTION_NAME
 import math
 load_dotenv()
 
@@ -12,8 +13,6 @@ from qdrant_client.models import VectorParams, Distance, PointStruct
 import uuid
 
 PROJECT_ROOT = Path(__file__).parents[1] # ....\version-aware-document-assistant
-
-COLLECTION_NAME = "pydantic-knowledge-base"
 
 INCLUDE = [
     ("pydantic-v1", "v1", "docs/examples/*.py"),

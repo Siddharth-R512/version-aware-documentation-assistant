@@ -1,11 +1,11 @@
 from dotenv import load_dotenv
 from openai import OpenAI
 from pprint import pprint
+from config import COLLECTION_NAME
 load_dotenv()
 
 from qdrant_client import QdrantClient
 
-COLLECTION_NAME = "pydantic-knowledge-base"
 client_db = QdrantClient(url="http://localhost:6333")
 
 def _get_client():
