@@ -8,6 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import COLLECTION_NAME, get_qdrant_client
+from src.retrieve import retrieve
 
 def _normalize(text: str) -> str:
     """Helper to remove markdown backticks and ignore case for heading matches."""
@@ -125,29 +126,110 @@ def audit(golden: list[dict], chunks: list[dict]):
         
     print(f"Summary: {fully_resolvable}/{answerable_count} answerable items fully resolvable.")
 
+def retrieve_top5(question: str, config: dict) -> list[tuple[str, str]]:
+    """Call YOUR existing retrieval. Return [(chunk_id, version)] in rank order."""
+    top_k = config.get("top_k", 5)
+    
+    # Call your real pipeline
+    results = retrieve(question, top_k=top_k)
+    
+    # Extract id and version from the payload of the Qdrant points
+    return [(str(doc.payload["id"]), str(doc.payload["version"])) for doc in results]
+
+def build_gt_pools(golden: list[dict], chunks: list[dict]) -> dict[str, set[str]]:
+    """Per question id: union of resolve_evidence over its gt_evidence list.
+    Recomputed every run — never cached to disk (D19)."""
+    pools = {}
+    for item in golden:
+        q_id = item["id"]
+        pools[q_id] = set()
+        scope = item.get("gt_version_scope", "any")
+        
+        # Unanswerable items simply have empty/no gt_evidence
+        for evidence in item.get("gt_evidence", []):
+            pools[q_id].update(resolve_evidence(evidence, chunks, scope))
+            
+    return pools
+
+def score_question(item: dict, pool: set[str], retrieved: list[tuple[str, str]]) -> dict:
+    """One golden item -> one CSV row dict. All metric logic lives here."""
+    q_id = item["id"]
+    category = item.get("category", "")
+    gt_version_scope = item.get("gt_version_scope", "any")
+    answerable = item.get("answerable", True)
+    
+    retrieved_ids = [r[0] for r in retrieved]
+    retrieved_versions = [r[1] for r in retrieved]
+    
+    row = {
+        "id": q_id,
+        "category": category,
+        "gt_version_scope": gt_version_scope,
+        "answerable": answerable,
+        "resolved_gt_count": len(pool),
+        "retrieved_ids": "|".join(retrieved_ids),
+        "retrieved_versions": "|".join(retrieved_versions),
+        "hit_at_5": "",
+        "first_gt_rank": "",
+        "mrr": "",
+        "version_precision": ""
+    }
+    
+    # Unanswerable items skip metrics computation (metrics remain NA/empty string)
+    if not answerable:
+        return row
+        
+    # hit@5 and MRR
+    hit = 0
+    mrr = 0.0
+    first_gt_rank = ""
+    
+    for i, (r_id, _) in enumerate(retrieved):
+        if r_id in pool:
+            hit = 1
+            first_gt_rank = i + 1  # 1-indexed rank
+            mrr = 1.0 / first_gt_rank
+            break
+            
+    row["hit_at_5"] = hit
+    row["first_gt_rank"] = first_gt_rank
+    row["mrr"] = mrr
+    
+    # Version precision
+    if gt_version_scope == "any":
+        # Report as NA to prevent free 1.0s from inflating averages
+        row["version_precision"] = ""  
+    else:
+        correct_version_count = 0
+        for _, r_version in retrieved:
+            if r_version in {gt_version_scope, "both"}:
+                correct_version_count += 1
+        row["version_precision"] = correct_version_count / len(retrieved) if retrieved else 0.0
+        
+    return row
+
 if __name__ == "__main__":
     golden = load_golden('eval/golden.jsonl')
-    # print(golden[:5])
-
     client = get_qdrant_client()
-
-    resolved_chunks = fetch_all_chunks(client=client)
-    # print(resolve_chunks)
-
-    audit(golden=golden, chunks=resolved_chunks)
-
-    # suspects = [
-    #     "docs/concepts/serialization.md",
-    #     "docs/migration.md",
-    #     "docs/concepts/conversion_table.md",
-    #     "docs/concepts/postponed_annotations.md",
-    #     "docs/concepts/validators.md",
-    #     "docs/errors/errors.md",
-    # ]
-    # for f in suspects:
-    #     n = sum(1 for c in resolved_chunks if c.get("source_file") == f)
-    #     print(f"{f}: {n} chunks in corpus")
-
-    # for c in resolved_chunks:
-    #     if c.get("source_file") == "docs/concepts/dataclasses.md" and c["id"].endswith(":000"):
-    #         print(repr(c["text"][:400]))
+    chunks = fetch_all_chunks(client=client)
+    
+    # Build the GT pools for all items
+    gt_pools = build_gt_pools(golden, chunks)
+    
+    # Test scoring on the first item
+    test_item = golden[0]
+    test_config = {"top_k": 5}
+    
+    print(f"Question: {test_item['question']}")
+    print(f"GT Scope: {test_item.get('gt_version_scope')}")
+    print(f"GT Pool IDs: {gt_pools[test_item['id']]}\n")
+    
+    retrieved = retrieve_top5(test_item['question'], test_config)
+    print("Retrieved tuples:")
+    for i, r in enumerate(retrieved):
+        print(f"  Rank {i+1}: {r}")
+        
+    row = score_question(test_item, gt_pools[test_item['id']], retrieved)
+    print("\nScored Row Output:")
+    for k, v in row.items():
+        print(f"  {k}: {v}")

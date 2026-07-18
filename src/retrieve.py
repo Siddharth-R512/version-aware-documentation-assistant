@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from openai import OpenAI
 from pprint import pprint
-from config import COLLECTION_NAME
+from src.config import COLLECTION_NAME
 load_dotenv()
 
 from qdrant_client import QdrantClient
