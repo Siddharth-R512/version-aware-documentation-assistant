@@ -1,0 +1,5 @@
+{
+    "name": "phase1_baseline",
+    "top_k": 5,
+    "retrieval": "dense"
+}
