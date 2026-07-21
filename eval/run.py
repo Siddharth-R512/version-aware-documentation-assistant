@@ -1,7 +1,11 @@
 # The Harness File
 import sys
 import json
+import csv
+import argparse
 from pathlib import Path
+from collections import defaultdict
+from typing import List, Dict, Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]   # ..\Sid-Projects\version-aware-document-assistant
 if str(PROJECT_ROOT) not in sys.path:
@@ -196,7 +200,7 @@ def score_question(item: dict, pool: set[str], retrieved: list[tuple[str, str]])
     row["mrr"] = mrr
     
     # Version precision
-    if gt_version_scope == "any":
+    if gt_version_scope in {'any', 'both'}:
         # Report as NA to prevent free 1.0s from inflating averages
         row["version_precision"] = ""  
     else:
@@ -208,28 +212,139 @@ def score_question(item: dict, pool: set[str], retrieved: list[tuple[str, str]])
         
     return row
 
+def summarize(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Groups in-memory detail rows by category (plus 'ALL'), computing NA-aware means.
+    """
+    groups = defaultdict(list)
+    for row in rows:
+        groups[row["category"]].append(row)
+        groups["ALL"].append(row)
+        
+    summary_rows = []
+    # Sort categories for consistent output, placing "ALL" at the absolute bottom
+    categories = sorted([k for k in groups.keys() if k != "ALL"]) + ["ALL"]
+    metrics = ["hit_at_5", "mrr", "version_precision"]
+    
+    for cat in categories:
+        cat_rows = groups[cat]
+        n_items = len(cat_rows)
+        # Count answerable items (denominator for hit_at_5 and mrr)
+        n_scored = sum(1 for r in cat_rows if r.get("answerable", True))
+        
+        summary_row = {
+            "category": cat,
+            "n_items": n_items,
+            "n_scored": n_scored,
+        }
+        
+        # Per group, per metric: NA-aware mean computation
+        for metric in metrics:
+            # Drop empty strings automatically filtering unanswerables and out-of-scope metrics
+            vals = [r[metric] for r in cat_rows if r[metric] != ""]
+            
+            if not vals:
+                summary_row[metric] = ""  # If nothing remains, summary cell is NA
+            else:
+                summary_row[metric] = sum(vals) / len(vals)
+                
+        summary_rows.append(summary_row)
+
+    assert any(r["category"] == "version_agnostic" for r in summary_rows), (
+        "FATAL: 'version_agnostic' category missing from summary rows. Dataset modified?"
+    )
+        
+    # Built-in Sanity Check (D18): Loudly assert that NA plumbing hasn't leaked
+    for s_row in summary_rows:
+        if s_row["category"] == "version_agnostic":
+            assert s_row["version_precision"] == "", (
+                f"FATAL: NA plumbing leak! 'version_agnostic' category must have NA for "
+                f"version_precision, but found: {s_row['version_precision']}"
+            )
+            
+    return summary_rows
+
+def write_summary(rows: List[Dict[str, Any]], path: str) -> None:
+    """Writes the summary CSV, handling the 3-decimal formatting at write-time."""
+    fieldnames = ["category", "n_items", "n_scored", "hit_at_5", "mrr", "version_precision"]
+    
+    # Format floats to 3 decimals just before writing
+    formatted_rows = []
+    for row in rows:
+        formatted = {}
+        for k, v in row.items():
+            if isinstance(v, float):
+                formatted[k] = f"{v:.3f}"
+            else:
+                formatted[k] = v
+        formatted_rows.append(formatted)
+        
+    # newline="" is non-negotiable for Windows CSVs
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(formatted_rows)
+
+def write_results(rows: list[dict], path: str) -> None:
+    """Writes the exact column order required, enforcing DictWriter strictness."""
+    fieldnames = [
+        "id", "category", "gt_version_scope", "answerable", 
+        "resolved_gt_count", "retrieved_ids", "retrieved_versions",
+        "hit_at_5", "first_gt_rank", "mrr", "version_precision"
+    ]
+    # newline="" is non-negotiable for Windows CSVs
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Eval Harness for Retrieval")
+    parser.add_argument("--config", required=True, help="Path to config JSON")
+    parser.add_argument("--audit", action="store_true", help="Run in audit mode")
+    args = parser.parse_args()
+
+    # Load frozen golden set and setup Qdrant
     golden = load_golden('eval/golden.jsonl')
     client = get_qdrant_client()
     chunks = fetch_all_chunks(client=client)
-    
-    # Build the GT pools for all items
+
+    if args.audit:
+        audit(golden, chunks)
+        sys.exit(0)
+
+    # Load config and extract name
+    config = load_config(args.config)
+    config_name = config.get("name", "unnamed_run")
+
+    # Set up paths safely
+    results_dir = Path("eval/results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    results_csv = results_dir / f"{config_name}.csv"
+    summary_csv = results_dir / f"{config_name}_summary.csv"
+
+    # Pre-build ground truth sets per item
     gt_pools = build_gt_pools(golden, chunks)
-    
-    # Test scoring on the first item
-    test_item = golden[0]
-    test_config = {"top_k": 5}
-    
-    print(f"Question: {test_item['question']}")
-    print(f"GT Scope: {test_item.get('gt_version_scope')}")
-    print(f"GT Pool IDs: {gt_pools[test_item['id']]}\n")
-    
-    retrieved = retrieve_top5(test_item['question'], test_config)
-    print("Retrieved tuples:")
-    for i, r in enumerate(retrieved):
-        print(f"  Rank {i+1}: {r}")
+
+    # Main evaluation loop
+    rows = []
+    print(f"Running evaluation for config: {config_name}...")
+    for item in golden:
+        question_text = item.get("question", "")
         
-    row = score_question(test_item, gt_pools[test_item['id']], retrieved)
-    print("\nScored Row Output:")
-    for k, v in row.items():
-        print(f"  {k}: {v}")
+        # Retrieve and Score
+        retrieved = retrieve_top5(question_text, config)
+        row = score_question(item, gt_pools[item["id"]], retrieved)
+        rows.append(row)
+
+    # 1. Write the detail CSV
+    write_results(rows, results_csv)
+    
+    # 2. Compute and write the summary CSV right alongside it
+    summary_rows = summarize(rows)
+    write_summary(summary_rows, summary_csv)
+    
+    print(f"Run completed. Wrote detail rows to {results_csv}")
+    print(f"Wrote summary to {summary_csv}")
+    
