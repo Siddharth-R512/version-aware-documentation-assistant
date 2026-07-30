@@ -70,21 +70,9 @@ Across these categories, **five questions** (one in **each category** except `v1
 
 **Ground truth survives re-chunking.** GT is keyed to `source_file::heading`, not chunk IDs and resolved to chunk IDs at runtime, never cached. Phase 3 will change the chunk boundary; the eval set won't care.
 
-**Resolver with an audit mode.** Evidence resolution is exact file match + normalized
-heading containment + a version filter (without the filter, identical filenames across
-the two source trees would put v1 chunks into v2 ground-truth pools — the harness
-would literally contaminate itself). `--audit` verifies every evidence string
-resolves to real chunks *before* any metric is computed. First audit run: 17/45 items
-resolvable. Diagnosed as 3 patterns (not 33 bugs), fixed, re-audited to 45/45 — and
-caught 9 evidence strings the LLM generator had written from memory of what docs
-usually look like, rather than from the files.
+**Resolver with an audit mode.** Evidence resolution is exact file match + normalized heading containment + a version filter (without the filter, identical \ filenames across the two source trees would put v1 chunks into v2 ground-truth pools — the harness would literally contaminate itself). `--audit` verifies every evidence string resolves to real chunks *before* any metric is computed. First audit run: 17/45 items resolvable. Diagnosed as 3 patterns (not 33 bugs), fixed, re-audited to 45/45 — and caught 9 evidence strings the LLM generator had written from memory of what docs usually look like, rather than from the files.
 
-**Deterministic, LLM-free scoring.** hit@5, MRR@5, and a custom **version precision**
-metric (fraction of top-5 in the correct version's lane; `both`-tagged chunks count as
-correct; NA for version-agnostic questions — a metric that doesn't apply reports NA,
-never a free 1.0 or a fake 0). NA is empty-string in the CSVs and excluded from every
-mean. The summary step asserts the NA plumbing holds — an assert that has already
-caught one real bug before it reached this README.
+**Deterministic, LLM-free scoring.** hit@5, MRR@5, and a custom **version precision** metric (fraction of top-5 in the correct version's lane; `both`-tagged chunks count as correct; NA for version-agnostic questions — a metric that doesn't apply reports NA, never a free 1.0 or a fake 0). NA is empty-string in the CSVs and excluded from every mean. The summary step asserts the NA plumbing holds — an assert that has already caught one real bug before it reached this README.
 
 ## Architecture (current)
 
@@ -108,5 +96,4 @@ Framework-free by design.. no LangChain/LlamaIndex.
 
 ## Decision log
 
-Every non-obvious choice is recorded in [`DECISIONS.md`](DECISIONS.md) as
-*decision → why → alternative rejected*
+Every non-obvious choice is recorded in [`DECISIONS.md`](DECISIONS.md) as *decision → why → alternative rejected*
