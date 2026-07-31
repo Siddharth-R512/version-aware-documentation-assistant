@@ -1,10 +1,12 @@
 import os
-from typing import List, Tuple
+from typing import List, Tuple, Literal
+from collections import deque
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 from schema import Chunk
 from config import COLLECTION_NAME
+from structures import Stack
 import math
 load_dotenv()
 
@@ -43,6 +45,7 @@ INCLUDE = [
     ("pydantic-v2", "v2", "pydantic/*.py"),
     ("pydantic-v2", "v2", "HISTORY.md"),
 ]
+
 def load_paths():
     path_vers_list = []
     for root, vers, pattern in INCLUDE:
@@ -58,6 +61,15 @@ def load_paths():
             kept += 1
         print(f"{root}/{pattern:40} -> {kept}")
     return path_vers_list
+
+def load_file_type(loaded_files: list[tuple[str, Path]], type: Literal[".md", ".py"]):
+    path_vers_list_type = []
+    for (v,f) in loaded_files:
+        if f.suffix == type:
+            path_vers_list_type.append((v,f))
+
+    return path_vers_list_type
+
 
 def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_overlap:int=200) -> list[Chunk]:
     """
@@ -76,8 +88,87 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
     symbol_name -> default -> None,
     linked_files -> default -> []
 
-    return: List[Chunk]
+    Phase 3: 3 Parsers
+    First, Markdown parser: 
     """
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be < chunk_size")
+    header_stack = Stack()
+    current_content = []
+    chunk_list = []
+    stride = chunk_size - chunk_overlap
+
+    load_md = load_file_type(loaded_files, type='.md')
+    print(f"Number of files to chunk: {len(load_md)}")
+
+    load_py = load_file_type(loaded_files, type='.py')
+
+    def flush_current_chunk():
+        content = "\n".join(current_content)
+        if content:
+            if header_stack:
+                p=0
+                index=0
+                while p<len(content):
+                    window = content[p:p+chunk_size]
+                    if not window.strip():
+                        p+=stride
+                        continue
+
+                    chunk_list.append(Chunk(
+                        id=f"{version}:{source_file}:{index:03d}",
+                        text=window,
+                        version=version,
+                        release_label=release_label,
+                        chunk_type="changelog" if f.name == "HISTORY.md" else "prose",
+                        source_file=source_file,
+                        header_path=header_stack,
+                    ))
+                    index +=1
+                    if p+chunk_size >=len(content):
+                        break
+
+
+    for (v,f) in load_md:
+        f = Path(f)
+        version = v
+        release_label = "v2.13" if v in ("v2", "both") else "v1.10"
+        root = "pydantic-v1" if "pydantic-v1" in f.parts else "pydantic-v2"
+        source_file = f.relative_to(PROJECT_ROOT / root).as_posix()
+        text = f.read_text(encoding='utf-8')
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                header_parts = stripped.split(" ", 1)
+                hashes = header_parts[0]
+                if all(char == "#" for char in hashes) and len(header_parts) > 1:
+                    level = len(hashes)
+                    print(f"LEVEL: {level}")
+                    header_title = header_parts[1].strip()
+                    print(f"Header Title: {header_title}")
+                    if current_content:
+                        flush_current_chunk()
+                        current_content.clear()
+
+                    while header_stack and int(header_stack.top()[0]) >=level:
+                        header_stack.pop()
+
+                    header_stack.push((level, header_title))
+                    
+            current_content.append(line)
+        flush_current_chunk()
+
+    return chunk_list
+
+
+            
+
+
+
+
+    
+    '''
     if chunk_overlap >= chunk_size:
         raise ValueError("chunk_overlap must be < chunk_size")
     chunk_list = []
@@ -117,6 +208,8 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
         print(f"No. of chunks in file {source_file} = {index}")
     
     return chunk_list
+
+    '''
 
 def _get_client():
     return OpenAI()
@@ -174,8 +267,11 @@ def upsert_chunks(chunks: list[Chunk], vectors: list[list[float]]) -> None:
 def main():    
     loaded_files = load_paths()
     print(f"Total files = {len(loaded_files)}")
+
+    chunks = chunk_file(loaded_files=loaded_files, chunk_size=1000, chunk_overlap=200)
+    print(chunks)
     # print(loaded_files)
-    chunks = chunk_file(loaded_files=loaded_files)
+    # chunks = chunk_file(loaded_files=loaded_files)
     # from collections import Counter
 
     # # --- per-version counts ---
@@ -203,12 +299,15 @@ def main():
     # for i in range(0, 4):
     #     print(chunks[i])
     #     print("\n"+"*"*30+"\n")
-    print(f"TOTAL CHUNKS: {len(chunks)}")
-    embed_list = embed_chunks(chunks=chunks)
-    print(f"vectors: {len(embed_list)}, dims: {len(embed_list[0])}")
 
-    print("PERFORMING Qdrant operations. UPSERT")
-    upsert_chunks(chunks=chunks, vectors=embed_list)
+
+
+    # print(f"TOTAL CHUNKS: {len(chunks)}")
+    # embed_list = embed_chunks(chunks=chunks)
+    # print(f"vectors: {len(embed_list)}, dims: {len(embed_list[0])}")
+
+    # print("PERFORMING Qdrant operations. UPSERT")
+    # upsert_chunks(chunks=chunks, vectors=embed_list)
 
 if __name__ =="__main__":
     main()
