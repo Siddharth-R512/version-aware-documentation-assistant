@@ -74,7 +74,7 @@ def load_file_type(loaded_files: list[tuple[str, Path]], type: Literal[".md", ".
     return path_vers_list_type
 
 
-def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_overlap:int=200) -> list[Chunk]:
+def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000) -> list[Chunk]:
     """
     Chunk .md files by heading structure.
 
@@ -84,8 +84,6 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
     - Heading-only chunks dropped. Zero overlap: structural boundaries replace P1's sliding window.
 
     """
-    if chunk_overlap >= chunk_size:
-        raise ValueError("chunk_overlap must be < chunk_size")
     
     chunk_list = []
     load_md = load_file_type(loaded_files, type='.md')
