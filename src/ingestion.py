@@ -76,12 +76,13 @@ def load_file_type(loaded_files: list[tuple[str, Path]], type: Literal[".md", ".
 
 def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_overlap:int=200) -> list[Chunk]:
     """
-    loaded_files = [(v, f)]
-    v --> v1, v2, or both
-    f --> file path .md or .py
+    Chunk .md files by heading structure.
 
-    Phase 3: 3 Parsers
-    First, Markdown parser: 
+    - One chunk per section (heading -> next heading), size-split at blank lines past chunk_size, never inside a code fence. 
+    - header_path = live heading stack snapshot. 
+    - ID = {version}::{source_file}::{leaf}::{occ:03d}, occ counts chunks per leaf. 
+    - Heading-only chunks dropped. Zero overlap: structural boundaries replace P1's sliding window.
+
     """
     if chunk_overlap >= chunk_size:
         raise ValueError("chunk_overlap must be < chunk_size")
@@ -100,6 +101,9 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
 
         header_stack = []
         current_content = []
+        current_length = 0
+
+        # ``` this symbol is the start and end of code in markdown
         in_fence = False
 
         occurrence_map = {}
@@ -109,20 +113,24 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
         chunks_before_file = len(chunk_list)
 
         def flush_current_chunk():
-            nonlocal current_content
+            nonlocal current_content, current_length
             content_str = "\n".join(current_content).strip()
             if not content_str:
                 current_content.clear()
+                current_length = 0
                 return
 
             if content_str.startswith("#") and len(content_str.splitlines()) == 1:
                 current_content.clear()
+                current_length = 0
                 return
 
             path_snapshot = [title for level, title in header_stack]
             if not path_snapshot:
                 path_snapshot = ["[Preamble]"]
 
+            # Leaf kept raw (backticks/links intact): D23 resolver normalizes on
+            # ITS side; normalizing here too would double-transform and break match.
             heading_leaf = path_snapshot[-1]
             occ = occurrence_map.get(heading_leaf, 0)
 
@@ -138,6 +146,7 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
 
             occurrence_map[heading_leaf] = occ + 1
             current_content.clear()
+            current_length = 0
 
         for line in text.splitlines():
             stripped = line.strip()
@@ -163,7 +172,7 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
 
             current_content.append(line)
 
-            current_length = sum(len(l) + 1 for l in current_content)
+            current_length += len(line) + 1
             if current_length >= chunk_size and not in_fence and not stripped:
                 flush_current_chunk()
 
@@ -274,7 +283,7 @@ def main():
     # print(f"Total files = {len(loaded_files)}")
 
     # Trial
-    file_path = PROJECT_ROOT / "pydantic-v2" / "docs" / "examples" / "custom_validators.md"
+    file_path = PROJECT_ROOT / "pydantic-v2" / "docs" / "concepts" / "strict_mode.md"
     files_to_process = [("v2", file_path)]
 
     resulting_chunks = chunk_file(loaded_files=files_to_process)
