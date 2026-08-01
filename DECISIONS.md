@@ -156,7 +156,7 @@ The golden set is frozen at 50 items, all hand-verified. From this commit on, th
 - conversion_table.md is macro-templated junk ({{ placeholders }}, content injected at docs build time) — it produced 1 empty chunk in the corpus. Question for P3: should files like this be excluded from ingestion?
 - Large-but-legitimate pools I've accepted and am done deliberating on: config.md (8), v1 dataclasses (7).
 
-## Phase 3: Markdown and AST Parsers
+## Phase 3: Markdown, Python AST and changelog Parsers
 
 ### D29. Ingestion exclusion list: explicit named list, never a heuristic
 

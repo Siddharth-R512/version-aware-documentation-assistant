@@ -65,6 +65,9 @@ def load_paths():
 def load_file_type(loaded_files: list[tuple[str, Path]], type: Literal[".md", ".py"]):
     path_vers_list_type = []
     for (v,f) in loaded_files:
+        if f.name == "HISTORY.md":
+            continue
+
         if f.suffix == type:
             path_vers_list_type.append((v,f))
 
@@ -77,57 +80,15 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
     v --> v1, v2, or both
     f --> file path .md or .py
 
-    chunk:
-    id -> "{version}:{source_file}:{index}" .. index is chunk counter,
-    text -> str,
-    version -> v,
-    release_label -> v1.10 or v2.13,
-    chunk_type = prose (all chunks, for now),
-    source_file -> f,
-    header_path -> default -> [],
-    symbol_name -> default -> None,
-    linked_files -> default -> []
-
     Phase 3: 3 Parsers
     First, Markdown parser: 
     """
     if chunk_overlap >= chunk_size:
         raise ValueError("chunk_overlap must be < chunk_size")
-    header_stack = Stack()
-    current_content = []
+    
     chunk_list = []
-    stride = chunk_size - chunk_overlap
-
     load_md = load_file_type(loaded_files, type='.md')
     print(f"Number of files to chunk: {len(load_md)}")
-
-    load_py = load_file_type(loaded_files, type='.py')
-
-    def flush_current_chunk():
-        content = "\n".join(current_content)
-        if content:
-            if header_stack:
-                p=0
-                index=0
-                while p<len(content):
-                    window = content[p:p+chunk_size]
-                    if not window.strip():
-                        p+=stride
-                        continue
-
-                    chunk_list.append(Chunk(
-                        id=f"{version}:{source_file}:{index:03d}",
-                        text=window,
-                        version=version,
-                        release_label=release_label,
-                        chunk_type="changelog" if f.name == "HISTORY.md" else "prose",
-                        source_file=source_file,
-                        header_path=header_stack,
-                    ))
-                    index +=1
-                    if p+chunk_size >=len(content):
-                        break
-
 
     for (v,f) in load_md:
         f = Path(f)
@@ -137,35 +98,79 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000, chunk_
         source_file = f.relative_to(PROJECT_ROOT / root).as_posix()
         text = f.read_text(encoding='utf-8')
 
+        header_stack = []
+        current_content = []
+        in_fence = False
+
+        occurrence_map = {}
+
+        # Tracking metrics for the current file
+        file_header_count = 0
+        chunks_before_file = len(chunk_list)
+
+        def flush_current_chunk():
+            nonlocal current_content
+            content_str = "\n".join(current_content).strip()
+            if not content_str:
+                current_content.clear()
+                return
+
+            if content_str.startswith("#") and len(content_str.splitlines()) == 1:
+                current_content.clear()
+                return
+
+            path_snapshot = [title for level, title in header_stack]
+            if not path_snapshot:
+                path_snapshot = ["[Preamble]"]
+
+            heading_leaf = path_snapshot[-1]
+            occ = occurrence_map.get(heading_leaf, 0)
+
+            chunk_list.append(Chunk(
+                id=f"{version}::{source_file}::{heading_leaf}::{occ:03d}",
+                text=content_str,
+                version=version,
+                release_label=release_label,
+                chunk_type="prose",
+                source_file=source_file,
+                header_path=path_snapshot
+            ))
+
+            occurrence_map[heading_leaf] = occ + 1
+            current_content.clear()
+
         for line in text.splitlines():
             stripped = line.strip()
-            if stripped.startswith("#"):
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+
+            if not in_fence and stripped.startswith("#"):
                 header_parts = stripped.split(" ", 1)
                 hashes = header_parts[0]
+
                 if all(char == "#" for char in hashes) and len(header_parts) > 1:
                     level = len(hashes)
-                    print(f"LEVEL: {level}")
                     header_title = header_parts[1].strip()
-                    print(f"Header Title: {header_title}")
+
+                    file_header_count += 1
+
                     if current_content:
                         flush_current_chunk()
-                        current_content.clear()
 
-                    while header_stack and int(header_stack.top()[0]) >=level:
+                    while header_stack and header_stack[-1][0]>=level:
                         header_stack.pop()
+                    header_stack.append((level, header_title))
 
-                    header_stack.push((level, header_title))
-                    
             current_content.append(line)
+
+            current_length = sum(len(l) + 1 for l in current_content)
+            if current_length >= chunk_size and not in_fence and not stripped:
+                flush_current_chunk()
+
         flush_current_chunk()
-
+        file_chunks_created = len(chunk_list) - chunks_before_file
+        print(f"Processed: {source_file} | Headers found: {file_header_count} | Chunks created: {file_chunks_created}")
     return chunk_list
-
-
-            
-
-
-
 
     
     '''
@@ -265,11 +270,22 @@ def upsert_chunks(chunks: list[Chunk], vectors: list[list[float]]) -> None:
     assert server_count == len(chunks), f"server has {server_count}, expected {len(chunks)}"
 
 def main():    
-    loaded_files = load_paths()
-    print(f"Total files = {len(loaded_files)}")
+    # loaded_files = load_paths()
+    # print(f"Total files = {len(loaded_files)}")
 
-    chunks = chunk_file(loaded_files=loaded_files, chunk_size=1000, chunk_overlap=200)
-    print(chunks)
+    # Trial
+    file_path = PROJECT_ROOT / "pydantic-v2" / "docs" / "examples" / "custom_validators.md"
+    files_to_process = [("v2", file_path)]
+
+    resulting_chunks = chunk_file(loaded_files=files_to_process)
+
+    for chunk in resulting_chunks:
+        print(f"ID: {chunk.id}")
+        print(f"Header Path: {chunk.header_path}")
+        print(f"Text Length: {len(chunk.text)} characters")
+        print("-" * 40)
+    # chunks = chunk_file(loaded_files=loaded_files, chunk_size=1000, chunk_overlap=200)
+    # print(chunks)
     # print(loaded_files)
     # chunks = chunk_file(loaded_files=loaded_files)
     # from collections import Counter
