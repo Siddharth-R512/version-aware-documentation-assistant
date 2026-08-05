@@ -183,11 +183,9 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000) -> lis
 # def chunk_py_files(version: Literal["v1", "v2", "both"], path: Path, pro) -> list[Chunk]:
 #     pass
 
-def chunk_python_files(loaded_files: list[tuple[str, Path]]) -> list[Chunk]:
+def chunk_python_files(loaded_files: list[tuple[str, Path]], debug:bool = False) -> list[Chunk]:
     py_vers_files = load_file_type(loaded_files=loaded_files, type='.py')
     chunk_py_list = []
-
-    
 
     def true_start(node):
         return (
@@ -202,17 +200,22 @@ def chunk_python_files(loaded_files: list[tuple[str, Path]]) -> list[Chunk]:
 
     for (v, f) in py_vers_files:
         f = Path(f)
+        version = v
         release_label = "v2.13" if v in {"v2", "both"} else "v1.10"
         root = "pydantic-v1" if "pydantic-v1" in f.parts else "pydantic-v2"
         source_file = f.relative_to(PROJECT_ROOT / root).as_posix()
+        module_stem = f.stem
+
         text = f.read_text(encoding='utf-8')
         lines = text.splitlines()
-
         tree = ast.parse(text)
+
         # print(ast.dump(tree, indent=4))
 
         DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
         TOP_TYPES = DEF_TYPES + (ast.ClassDef,)
+
+        # list of (symbol_name, header_path, start, end)
         segment = []
         current_line = 1
 
@@ -224,7 +227,8 @@ def chunk_python_files(loaded_files: list[tuple[str, Path]]) -> list[Chunk]:
             if current_line<start:
                 if slice_code(lines, current_line, start-1).strip():
                     segment.append((
-                        "[PREAMBLE]",
+                        module_stem,
+                        [module_stem],
                         current_line,
                         start-1
                     ))
@@ -235,6 +239,7 @@ def chunk_python_files(loaded_files: list[tuple[str, Path]]) -> list[Chunk]:
                 if methods:
                     segment.append((
                         node.name,
+                        [module_stem, node.name],
                         start,
                         true_start(methods[0]) - 1
                     ))
@@ -242,12 +247,14 @@ def chunk_python_files(loaded_files: list[tuple[str, Path]]) -> list[Chunk]:
                     for m in methods:
                         segment.append((
                             f"{node.name}.{m.name}",
+                            [module_stem, node.name, m.name],
                             true_start(m),
                             m.end_lineno
                         ))
                 else:         
                     segment.append((
                         node.name,
+                        [module_stem, node.name],
                         start,
                         node.end_lineno
                     ))
@@ -256,6 +263,7 @@ def chunk_python_files(loaded_files: list[tuple[str, Path]]) -> list[Chunk]:
 
                 segment.append((
                     node.name,
+                    [module_stem, node.name],
                     start,
                     node.end_lineno
                 ))
@@ -265,12 +273,40 @@ def chunk_python_files(loaded_files: list[tuple[str, Path]]) -> list[Chunk]:
         if current_line <= len(lines):
             if slice_code(lines, current_line, len(lines)).strip():
                 segment.append((
-                    "[PREAMBLE]",
+                    module_stem,
+                    [module_stem],
                     current_line,
                     len(lines)
                 ))
 
-        print(segment)
+        if debug:
+            print(segment)
+
+        occurrence_map = {}
+        chunks_before_file = len(chunk_py_list)
+
+        for symbol, header_path, start, end in segment:
+            body = slice_code(lines, start, end).strip("\n")
+            if not body.strip():
+                continue
+
+            occ = occurrence_map.get(symbol, 0)
+
+            chunk_py_list.append(Chunk(
+                id=f"{version}::{source_file}::{symbol}::{occ:03d}",
+                text=body,
+                version=version,
+                release_label=release_label,
+                chunk_type='code',
+                source_file=source_file,
+                header_path=header_path,
+                symbol_name=symbol
+            ))
+
+            occurrence_map[symbol] = occ + 1
+
+        file_chunks_created = len(chunk_py_list) - chunks_before_file
+        print(f"Processed: {source_file} | Segments found: {len(segment)} | Chunks created: {file_chunks_created}")
 
     return chunk_py_list
 
@@ -388,7 +424,7 @@ def main():
     #     print("-" * 40)
 
     
-    file_path = PROJECT_ROOT / "pydantic-v1" / "docs" / "examples" / "validation_decorator_async.py"
+    file_path = PROJECT_ROOT / "pydantic-v1" / "docs" / "examples" / "dataclasses_arbitrary_types_allowed.py"
     # file_path = PROJECT_ROOT / "misc" / "sample2.py"
     files_to_process = [("v1", file_path)]
 
