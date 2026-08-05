@@ -1,3 +1,4 @@
+import ast
 import os
 from typing import List, Tuple, Literal
 from collections import deque
@@ -179,6 +180,100 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000) -> lis
         print(f"Processed: {source_file} | Headers found: {file_header_count} | Chunks created: {file_chunks_created}")
     return chunk_list
 
+# def chunk_py_files(version: Literal["v1", "v2", "both"], path: Path, pro) -> list[Chunk]:
+#     pass
+
+def chunk_python_files(loaded_files: list[tuple[str, Path]]) -> list[Chunk]:
+    py_vers_files = load_file_type(loaded_files=loaded_files, type='.py')
+    chunk_py_list = []
+
+    
+
+    def true_start(node):
+        return (
+            min(d.lineno for d in node.decorator_list)
+            if node.decorator_list
+            else node.lineno
+        )
+
+    def slice_code(lines, start, end):
+        return "\n".join(lines[start-1:end])
+
+
+    for (v, f) in py_vers_files:
+        f = Path(f)
+        release_label = "v2.13" if v in {"v2", "both"} else "v1.10"
+        root = "pydantic-v1" if "pydantic-v1" in f.parts else "pydantic-v2"
+        source_file = f.relative_to(PROJECT_ROOT / root).as_posix()
+        text = f.read_text(encoding='utf-8')
+        lines = text.splitlines()
+
+        tree = ast.parse(text)
+        # print(ast.dump(tree, indent=4))
+
+        DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+        TOP_TYPES = DEF_TYPES + (ast.ClassDef,)
+        segment = []
+        current_line = 1
+
+        for node in tree.body:
+            if not isinstance(node, TOP_TYPES):
+                continue
+
+            start = true_start(node)
+            if current_line<start:
+                if slice_code(lines, current_line, start-1).strip():
+                    segment.append((
+                        "[PREAMBLE]",
+                        current_line,
+                        start-1
+                    ))
+
+            if isinstance(node, ast.ClassDef):
+                methods = [n for n in node.body if isinstance(n, DEF_TYPES)]
+
+                if methods:
+                    segment.append((
+                        node.name,
+                        start,
+                        true_start(methods[0]) - 1
+                    ))
+
+                    for m in methods:
+                        segment.append((
+                            f"{node.name}.{m.name}",
+                            true_start(m),
+                            m.end_lineno
+                        ))
+                else:         
+                    segment.append((
+                        node.name,
+                        start,
+                        node.end_lineno
+                    ))
+
+            else:
+
+                segment.append((
+                    node.name,
+                    start,
+                    node.end_lineno
+                ))
+
+            current_line = node.end_lineno+1
+
+        if current_line <= len(lines):
+            if slice_code(lines, current_line, len(lines)).strip():
+                segment.append((
+                    "[PREAMBLE]",
+                    current_line,
+                    len(lines)
+                ))
+
+        print(segment)
+
+    return chunk_py_list
+
     
     '''
     if chunk_overlap >= chunk_size:
@@ -281,16 +376,25 @@ def main():
     # print(f"Total files = {len(loaded_files)}")
 
     # Trial
-    file_path = PROJECT_ROOT / "pydantic-v2" / "docs" / "concepts" / "strict_mode.md"
-    files_to_process = [("v2", file_path)]
+    # file_path = PROJECT_ROOT / "pydantic-v2" / "docs" / "concepts" / "strict_mode.md"
+    # files_to_process = [("v2", file_path)]
 
-    resulting_chunks = chunk_file(loaded_files=files_to_process)
+    # resulting_chunks = chunk_file(loaded_files=files_to_process)
 
-    for chunk in resulting_chunks:
-        print(f"ID: {chunk.id}")
-        print(f"Header Path: {chunk.header_path}")
-        print(f"Text Length: {len(chunk.text)} characters")
-        print("-" * 40)
+    # for chunk in resulting_chunks:
+    #     print(f"ID: {chunk.id}")
+    #     print(f"Header Path: {chunk.header_path}")
+    #     print(f"Text Length: {len(chunk.text)} characters")
+    #     print("-" * 40)
+
+    
+    file_path = PROJECT_ROOT / "pydantic-v1" / "docs" / "examples" / "validation_decorator_async.py"
+    # file_path = PROJECT_ROOT / "misc" / "sample2.py"
+    files_to_process = [("v1", file_path)]
+
+    chunks = chunk_python_files(files_to_process)
+    print(chunks)
+
     # chunks = chunk_file(loaded_files=loaded_files, chunk_size=1000, chunk_overlap=200)
     # print(chunks)
     # print(loaded_files)
