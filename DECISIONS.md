@@ -185,3 +185,6 @@ Pre-registered hypothesis (written before measuring): these two files are prime 
 Parallel to D30's hypothesis, registered before the P3 re-run so it counts. If P1's ingestion only walked docs/, then HISTORY.md was never indexed — and migration questions were starved of exactly the "what changed in vX.Y" evidence they need, which would explain migration_diff's weak baseline (hit 0.333, MRR 0.170, the worst MRR of any answerable category).
 
 Same structure as D30: suspect, not proven culprit. The P3 re-run is the judge — if migration_diff moves meaningfully once HISTORY.md enters via Parser 3, the starvation mechanism is confirmed; if it doesn't, the cause lies elsewhere (chunking, routing, or the P6 lever). Either outcome is a finding, and both hypotheses are committed in writing before measurement.
+
+### D32: v2 HISTORY.md contains v1.x/v0.x release entries (first at line 2536)
+Ingested as-is, tagged v2 per worktree rule (Option B, q003-shim treatment). PRE-REGISTERED SUSPECT: v2-tagged v1.x changelog chunks may hurt ver_prec on version_explicit_v1 / migration_diff. P3 baseline re-run is judge. D30's exclusion precedent considered and declined: duplicate-count check deferred, revisit at audit if suspect fires.

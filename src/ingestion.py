@@ -1,5 +1,6 @@
 import ast
 import os
+import re
 from typing import List, Tuple, Literal
 from collections import deque
 from pathlib import Path
@@ -310,49 +311,77 @@ def chunk_python_files(loaded_files: list[tuple[str, Path]], debug:bool = False)
 
     return chunk_py_list
 
-    
-    '''
-    if chunk_overlap >= chunk_size:
-        raise ValueError("chunk_overlap must be < chunk_size")
-    chunk_list = []
-    stride = chunk_size - chunk_overlap
-    
-    print(f"No. of files to chunk = {len(loaded_files)}")
+def chunk_changelog_file(loaded_files: list[tuple[str, Path]], debug: bool = False) -> list[Chunk]:
+    chunk_log_list = []
+
+    RELEASE_RE = re.compile(r"^##\s+(v\S+)")
+
     for (v, f) in loaded_files:
         f = Path(f)
         version = v
-        release_label = "v2.13" if v in ("v2", "both") else "v1.10"
+        release_label = "v2.13" if v in {"v2", "both"} else "v1.10"
         root = "pydantic-v1" if "pydantic-v1" in f.parts else "pydantic-v2"
         source_file = f.relative_to(PROJECT_ROOT / root).as_posix()
-        text = f.read_text(encoding='utf-8')
-        pos = 0
-        index = 0
-        while pos < len(text):
-            window = text[pos:pos+chunk_size]
-            if not window.strip():
-                pos+=stride
-                continue
-            chunk_list.append(
-                Chunk(
-                    id=f"{version}:{source_file}:{index:03d}",
-                    text=window,
-                    version=version,
-                    release_label=release_label,
-                    chunk_type="changelog" if f.name == "HISTORY.md" else "prose",
-                    source_file=source_file
-                )
-            )
-            index +=1
-            if pos + chunk_size >= len(text): # last window reached EOF.. a further window would be pure overlap
-                break
-            pos += stride
-            
-            # print(f"Created chunk {index} for file {source_file}")
-        print(f"No. of chunks in file {source_file} = {index}")
-    
-    return chunk_list
 
-    '''
+        text = f.read_text(encoding='utf-8')
+
+        occurrence_map = {}
+        chunks_before_file = len(chunk_log_list)
+
+        current_leaf = None
+        current_content = []
+        in_fence = False
+
+        def flush_current_chunk():
+            nonlocal current_content
+            if current_leaf is None:
+                current_content.clear()
+                return
+
+            content_str = "\n".join(current_content).strip()
+            if not content_str:
+                current_content.clear()
+                return
+
+            occ = occurrence_map.get(current_leaf, 0)
+
+            chunk_log_list.append(Chunk(
+                id=f"{version}::{source_file}::{current_leaf}::{occ:03d}",
+                text=content_str,
+                version=version,
+                release_label=release_label,
+                chunk_type="changelog",
+                source_file=source_file,
+                header_path=[current_leaf]
+            ))
+
+            occurrence_map[current_leaf] = occ + 1
+            current_content.clear()
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+
+            if not in_fence:
+                m = RELEASE_RE.match(stripped)
+                if m:
+                    flush_current_chunk()
+                    current_leaf = m.group(1)
+
+            current_content.append(line)
+
+        flush_current_chunk()
+
+        file_chunks_created = len(chunk_log_list) - chunks_before_file
+        print(f"Processed: {source_file} | Releases found: {file_chunks_created}")
+
+    if debug:
+        for c in chunk_log_list[:5]:
+            print(c.id, "|", c.header_path)
+
+    return chunk_log_list
+
 
 def _get_client():
     return OpenAI()
@@ -424,12 +453,17 @@ def main():
     #     print("-" * 40)
 
     
-    file_path = PROJECT_ROOT / "pydantic-v1" / "docs" / "examples" / "dataclasses_arbitrary_types_allowed.py"
+    # file_path = PROJECT_ROOT / "pydantic-v1" / "docs" / "examples" / "dataclasses_arbitrary_types_allowed.py"
     # file_path = PROJECT_ROOT / "misc" / "sample2.py"
-    files_to_process = [("v1", file_path)]
+    # files_to_process = [("v1", file_path)]
 
-    chunks = chunk_python_files(files_to_process)
-    print(chunks)
+    for v in ['v2']:
+        changelog_to_process = [(v, PROJECT_ROOT / f"pydantic-{v}" / "HISTORY.md")]
+        chunks = chunk_changelog_file(changelog_to_process, debug=True)
+        print(chunks)
+
+    # chunks = chunk_python_files(files_to_process)
+    # print(chunks)
 
     # chunks = chunk_file(loaded_files=loaded_files, chunk_size=1000, chunk_overlap=200)
     # print(chunks)
