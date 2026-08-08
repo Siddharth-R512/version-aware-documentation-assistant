@@ -437,30 +437,30 @@ def upsert_chunks(chunks: list[Chunk], vectors: list[list[float]]) -> None:
     assert server_count == len(chunks), f"server has {server_count}, expected {len(chunks)}"
 
 def main():    
-    # loaded_files = load_paths()
+    loaded_files = load_paths()
     # print(f"Total files = {len(loaded_files)}")
-
     # Trial
     # file_path = PROJECT_ROOT / "pydantic-v2" / "docs" / "concepts" / "strict_mode.md"
     # files_to_process = [("v2", file_path)]
 
-    # resulting_chunks = chunk_file(loaded_files=files_to_process)
+    resulting_chunks = chunk_file(loaded_files=loaded_files)
 
-    # for chunk in resulting_chunks:
-    #     print(f"ID: {chunk.id}")
-    #     print(f"Header Path: {chunk.header_path}")
-    #     print(f"Text Length: {len(chunk.text)} characters")
-    #     print("-" * 40)
+    for chunk in resulting_chunks:
+        print(f"ID: {chunk.id}")
+        print(f"Symbol name: {chunk.symbol_name} ")
+        print("-" * 40)
+        print()
+    print(f"Chunk count total = {len(resulting_chunks)}")
 
     
     # file_path = PROJECT_ROOT / "pydantic-v1" / "docs" / "examples" / "dataclasses_arbitrary_types_allowed.py"
     # file_path = PROJECT_ROOT / "misc" / "sample2.py"
     # files_to_process = [("v1", file_path)]
 
-    for v in ['v2']:
-        changelog_to_process = [(v, PROJECT_ROOT / f"pydantic-{v}" / "HISTORY.md")]
-        chunks = chunk_changelog_file(changelog_to_process, debug=True)
-        print(chunks)
+    # for v in ['v2']:
+    #     changelog_to_process = [(v, PROJECT_ROOT / f"pydantic-{v}" / "HISTORY.md")]
+    #     chunks = chunk_changelog_file(changelog_to_process, debug=True)
+    #     print(chunks)
 
     # chunks = chunk_python_files(files_to_process)
     # print(chunks)
