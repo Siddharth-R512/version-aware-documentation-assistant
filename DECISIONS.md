@@ -191,6 +191,13 @@ Ingested as-is, tagged v2 per worktree rule (Option B, q003-shim treatment). PRE
 
 ### D33. Collection DELETION in a separate dir
 
-Took precaution of accidental deletion of collection by moving into another directory (scripts/danger_delete_collection.py). This cannot be imported elsewhere. When 'I CONFIRM' typed, this deletes the collection entirely.
+Collection deletion lives in `scripts/danger_delete_collection.py`, not `src/`, so nothing in the pipeline imports it and no ingest or eval path can trigger deletion as a side effect.
 
-### D34. ConfigDict (v2, 9,615 tok) exceeds embed cap; embed input truncated at 8,000 tokens, full text preserved in payload;
+Execution is gated behind `main` and an interactive prompt requiring the exact collection name. It prints the point count before deletion and verifies the collection is gone with `get_collections()` afterward.
+
+This isn’t security.. Python has none here. It’s deliberate friction: deletion should always be a decision.
+
+### D34. ConfigDict exceeds embed token cap — truncate at embed time only
+Discovered during P3 re-ingest: `v2::pydantic/config.py::ConfigDict::000` is **9,615 tokens, exceeding the 8,192 limit**. It’s the only corpus-wide chunk over the cap, confirmed by a full census. Code tokenizes more densely than prose (~2–3 chars/token), so char-based estimates missed it.
+
+Fix: truncate only the embedding input to 8,000 tokens, with a loud TRUNCATING print. The stored payload retains the full text, so retrieval and generation still see the complete chunk. The trade-off is that the vector represents only the first ~83%, slightly disadvantaging queries targeting late fields.
