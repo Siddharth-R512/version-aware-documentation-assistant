@@ -10,6 +10,7 @@ from schema import Chunk
 from config import COLLECTION_NAME
 from structures import Stack
 import math
+import tiktoken
 load_dotenv()
 
 from qdrant_client import QdrantClient
@@ -181,8 +182,6 @@ def chunk_file(loaded_files: list[tuple[str, Path]], chunk_size:int=1000) -> lis
         print(f"Processed: {source_file} | Headers found: {file_header_count} | Chunks created: {file_chunks_created}")
     return chunk_list
 
-# def chunk_py_files(version: Literal["v1", "v2", "both"], path: Path, pro) -> list[Chunk]:
-#     pass
 
 def chunk_python_files(loaded_files: list[tuple[str, Path]], debug:bool = False) -> list[Chunk]:
     py_vers_files = load_file_type(loaded_files=loaded_files, type='.py')
@@ -313,10 +312,15 @@ def chunk_python_files(loaded_files: list[tuple[str, Path]], debug:bool = False)
 
 def chunk_changelog_file(loaded_files: list[tuple[str, Path]], debug: bool = False) -> list[Chunk]:
     chunk_log_list = []
+    changelog_files = [
+        (v, f)
+        for v, f in loaded_files
+        if f.name == "HISTORY.md"
+    ]
 
     RELEASE_RE = re.compile(r"^##\s+(v\S+)")
 
-    for (v, f) in loaded_files:
+    for (v, f) in changelog_files:
         f = Path(f)
         version = v
         release_label = "v2.13" if v in {"v2", "both"} else "v1.10"
@@ -390,9 +394,17 @@ def embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
     results = []
     batch_count = math.ceil(len(chunks)/100)
     client =_get_client()
+    enc = tiktoken.get_encoding("cl100k_base")
     for i in range(0, len(chunks), 100):
         batch = chunks[i:i+100]
-        text_batch = [c.text for c in batch]
+        text_batch = []
+        for c in batch:
+            tokens = enc.encode(c.text)
+            if len(tokens) > 8000:
+                print(f"TRUNCATING for embed: {c.id} ({len(tokens)} tokens)")
+                text_batch.append(enc.decode(tokens[:8000]))
+            else:
+                text_batch.append(c.text)
         print(f"PROGRESS {i//100 + 1}/{batch_count}")
         print(f"CHUNKS to EMBEDDINGS {len(batch)} out of {len(chunks)}")
         response = client.embeddings.create(
@@ -438,73 +450,42 @@ def upsert_chunks(chunks: list[Chunk], vectors: list[list[float]]) -> None:
 
 def main():    
     loaded_files = load_paths()
-    # print(f"Total files = {len(loaded_files)}")
-    # Trial
-    # file_path = PROJECT_ROOT / "pydantic-v2" / "docs" / "concepts" / "strict_mode.md"
-    # files_to_process = [("v2", file_path)]
+    print(f"Total files = {len(loaded_files)}")
 
-    resulting_chunks = chunk_file(loaded_files=loaded_files)
+    result_chunks_md = chunk_file(loaded_files=loaded_files)
+    result_chunks_py = chunk_python_files(loaded_files=loaded_files)
+    result_chunks_changelog = chunk_changelog_file(loaded_files=loaded_files)
 
-    for chunk in resulting_chunks:
-        print(f"ID: {chunk.id}")
-        print(f"Symbol name: {chunk.symbol_name} ")
-        print("-" * 40)
-        print()
-    print(f"Chunk count total = {len(resulting_chunks)}")
+    all_chunks = result_chunks_md + result_chunks_py + result_chunks_changelog
 
-    
-    # file_path = PROJECT_ROOT / "pydantic-v1" / "docs" / "examples" / "dataclasses_arbitrary_types_allowed.py"
-    # file_path = PROJECT_ROOT / "misc" / "sample2.py"
-    # files_to_process = [("v1", file_path)]
+    # print(sum(1 for c in result_chunks_md if "HISTORY" in c.source_file))
+    # print(len(result_chunks_md), len(result_chunks_py), len(result_chunks_changelog))
+    # print(len(all_chunks))
+    # ids = [c.id for c in all_chunks]
+    # assert len(ids) == len(set(ids)), "duplicate chunk IDs across parsers"
 
-    # for v in ['v2']:
-    #     changelog_to_process = [(v, PROJECT_ROOT / f"pydantic-{v}" / "HISTORY.md")]
-    #     chunks = chunk_changelog_file(changelog_to_process, debug=True)
-    #     print(chunks)
+    # print(f"Total Chunks from both HISTORY.md file: {len(result_chunks_changelog)}")
+    # max_char = max(len(c.text) for c in result_chunks_changelog)
+    # print(f"Max char of chunk: {max_char}")
+
+    # for chunk in resulting_chunks:
+    #     print(f"ID: {chunk.id}")
+    #     print(f"Symbol name: {chunk.symbol_name} ")
+    #     print("-" * 40)
+    #     print()
+    # print(f"Chunk count total = {len(resulting_chunks)}")
+
 
     # chunks = chunk_python_files(files_to_process)
     # print(chunks)
 
-    # chunks = chunk_file(loaded_files=loaded_files, chunk_size=1000, chunk_overlap=200)
-    # print(chunks)
-    # print(loaded_files)
-    # chunks = chunk_file(loaded_files=loaded_files)
-    # from collections import Counter
 
-    # # --- per-version counts ---
-    # print(f"TOTAL CHUNKS: {len(chunks)}")
-    # print("Per-version:", Counter(c.version for c in chunks))
-    # print("Per-type:   ", Counter(c.chunk_type for c in chunks))
+    print(f"TOTAL CHUNKS: {len(all_chunks)}")
+    embed_list = embed_chunks(chunks=all_chunks)
+    print(f"vectors: {len(embed_list)}, dims: {len(embed_list[0])}")
 
-    # # --- eyeball: one migration chunk (verify version='both') ---
-    # mig = [c for c in chunks if c.source_file == "docs/migration.md"]
-    # print(f"\nmigration.md chunks: {len(mig)}")
-    # print(f"sample -> id={mig[0].id}  version={mig[0].version}")
-    # print(mig[0].text[:400])
-
-    # # --- eyeball: one v2 main.py chunk (see the ugly split) ---
-    # mainpy = [c for c in chunks if c.source_file == "pydantic/main.py" and c.version == "v2"]
-    # print(f"\nv2 main.py chunks: {len(mainpy)}")
-    # print(mainpy[len(mainpy)//2].text[:600])   # middle of the file, mid-function odds high
-
-    # # --- eyeball: adjacent-chunk overlap check ---
-    # a, b = mig[0], mig[1]
-    # print("overlap ok:", a.text[-200:] == b.text[:200])
-    # print(f"\noverlap check: {a.id} tail == {b.id} head ?")
-    # print("TAIL:", repr(a.text[-100:]))
-    # print("HEAD:", repr(b.text[:100]))
-    # for i in range(0, 4):
-    #     print(chunks[i])
-    #     print("\n"+"*"*30+"\n")
-
-
-
-    # print(f"TOTAL CHUNKS: {len(chunks)}")
-    # embed_list = embed_chunks(chunks=chunks)
-    # print(f"vectors: {len(embed_list)}, dims: {len(embed_list[0])}")
-
-    # print("PERFORMING Qdrant operations. UPSERT")
-    # upsert_chunks(chunks=chunks, vectors=embed_list)
+    print("PERFORMING Qdrant operations. UPSERT")
+    upsert_chunks(chunks=all_chunks, vectors=embed_list)
 
 if __name__ =="__main__":
     main()

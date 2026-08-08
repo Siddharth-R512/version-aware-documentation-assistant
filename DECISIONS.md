@@ -188,3 +188,9 @@ Same structure as D30: suspect, not proven culprit. The P3 re-run is the judge â
 
 ### D32: v2 HISTORY.md contains v1.x/v0.x release entries (first at line 2536)
 Ingested as-is, tagged v2 per worktree rule (Option B, q003-shim treatment). PRE-REGISTERED SUSPECT: v2-tagged v1.x changelog chunks may hurt ver_prec on version_explicit_v1 / migration_diff. P3 baseline re-run is judge. D30's exclusion precedent considered and declined: duplicate-count check deferred, revisit at audit if suspect fires.
+
+### D33. Collection DELETION in a separate dir
+
+Took precaution of accidental deletion of collection by moving into another directory (scripts/danger_delete_collection.py). This cannot be imported elsewhere. When 'I CONFIRM' typed, this deletes the collection entirely.
+
+### D34. ConfigDict (v2, 9,615 tok) exceeds embed cap; embed input truncated at 8,000 tokens, full text preserved in payload;
