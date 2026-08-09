@@ -51,10 +51,10 @@ def fetch_all_chunks(client) -> list[dict]:
         if offset is None:
             break
 
-    assert len(points) == 3248, f"Expected 3248 chunks in Qdrant, found {len(points)}"
+    assert len(points) == 3599, f"Expected 3599 chunks in Qdrant, found {len(points)}"
     return [p.payload for p in points]
 
-def resolve_evidence(evidence: str, chunks: list[dict], scope: str) -> set[str]:
+def resolve_evidence_old(evidence: str, chunks: list[dict], scope: str) -> set[str]:
     """
     gt_evidence format convert into set of IDs
     file :: heading
@@ -89,6 +89,50 @@ def resolve_evidence(evidence: str, chunks: list[dict], scope: str) -> set[str]:
         # Normalize both sides before checking containment
         if target_heading in _normalize(joined_header) or target_heading in _normalize(text):
             resolved_ids.add(chunk.get("id"))
+
+    return resolved_ids
+
+def resolve_evidence(evidence: str, chunks: list[dict], scope: str) -> set[str]:
+    """
+    gt_evidence format convert into set of IDs
+    file :: heading
+    file exact match and heading in joined header_path (text branch removed per D35)
+    """
+    resolved_ids = set()
+    parts = evidence.split('::')
+    
+    # HYGIENE FIX: Raise loudly on malformed keys instead of silently returning empty
+    if len(parts) != 2:
+        raise ValueError(f"MALFORMED GT KEY: '{evidence}'. Expected format 'file :: heading'")
+    
+    target_file = parts[0].strip()
+    target_heading = _normalize(parts[1].strip())  
+    
+    for chunk in chunks:
+        # 1. File Filter
+        if chunk.get("source_file") != target_file:
+            continue
+            
+        # 2. Version Filter
+        chunk_version = chunk.get("version", "both")
+        if scope == "v1" and chunk_version not in {"v1", "both"}:
+            continue
+        if scope == "v2" and chunk_version not in {"v2", "both"}:
+            continue
+
+        # 3. Header Match (D35: Text branch removed)
+        header_path = chunk.get('header_path', [])
+        if isinstance(header_path, list):
+            joined_header = " > ".join(header_path)
+        else:
+            joined_header = str(header_path)
+            
+        # Match only against heading containment
+        if target_heading in _normalize(joined_header):
+            resolved_ids.add(chunk.get("id"))
+
+    if not resolved_ids:
+        print(f"WARNING: GT key resolved ZERO chunks: '{evidence}'")
 
     return resolved_ids
 

@@ -201,3 +201,19 @@ This isn’t security.. Python has none here. It’s deliberate friction: deleti
 Discovered during P3 re-ingest: `v2::pydantic/config.py::ConfigDict::000` is **9,615 tokens, exceeding the 8,192 limit**. It’s the only corpus-wide chunk over the cap, confirmed by a full census. Code tokenizes more densely than prose (~2–3 chars/token), so char-based estimates missed it.
 
 Fix: truncate only the embedding input to 8,000 tokens, with a loud TRUNCATING print. The stored payload retains the full text, so retrieval and generation still see the complete chunk. The trade-off is that the vector represents only the first ~83%, slightly disadvantaging queries targeting late fields.
+
+### D35: Tightened Evaluator GT Resolution (Resolver v2)
+**Context:** Probe audits revealed resolution pools for certain queries (e.g., q046, q003) were artificially inflated 2x-5x.
+**Issue:** The resolve_evidence function was checking target_heading against BOTH header_path (correct) and chunk text (incorrect). This acted as a loose phrase search, sweeping in chunks that merely mentioned a section's title in passing, which violated D19's section-level GT semantics.
+**Decision:** Removed the text-containment branch entirely. The resolver now matches exclusively against header_path containment. A diagnostic confirmed that header_path inherently includes symbol_name for Parser 2 code chunks, meaning no separate symbol logic was needed to preserve .py file resolutions.
+**Effect & Findings:**
+
+- **Masked Keys Exposed:**The tightened resolver retroactively exposed two GT keys (q019, q037) that were sentence fragments instead of actual headings. These had been faking resolution via body-text mentions since P2 and were addressed in Block 3.
+
+- **Per-Key vs Per-Question Masking:** The dead first key of q049 went unnoticed because a second healthy key provided a non-zero aggregate count. Per-question pool counts do not certify per-key health.
+
+- **Parser Coupling ([Preamble]):** One GT key (q049) now explicitly keys on the synthetic [Preamble] heading. This couples the key to Parser 1's convention for text preceding the first Markdown heading.
+
+- **Pool Size Caveat:** While text-branch artifacts were removed, structural chunking still legitimately produces massive pools for large sections (e.g., q003 at 22 chunks, q044 at 27 chunks). D19 section-level semantics are retained, but this explicitly quantifies that hit@5 remains mechanically generous for these queries. This caveat must frame the Phase 3 diff analysis.
+
+- **Golden Set Amendment:** While gt_evidence is the only editable field under D19, q037's answerable flag was flipped to false. This was a forced consequence of an empty evidence set: q037's answerability was an artifact of the resolver bug. With evidence unresolvable and the answer absent from the corpus, the flag was corrected to match reality. The question text remains untouched.
