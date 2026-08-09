@@ -1,0 +1,8 @@
+category,n_items,n_scored,hit_at_5,mrr,version_precision
+api_lookup,5,4,0.500,0.500,0.650
+howto_usage,10,8,0.375,0.108,0.633
+migration_diff,10,9,0.778,0.444,0.578
+version_agnostic,10,9,0.667,0.537,
+version_explicit_v1,5,5,0.200,0.067,0.320
+version_explicit_v2,10,9,0.556,0.287,0.533
+ALL,50,44,0.545,0.332,0.545

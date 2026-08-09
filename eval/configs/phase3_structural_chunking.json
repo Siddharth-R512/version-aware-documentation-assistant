@@ -1,0 +1,5 @@
+{
+    "name": "phase3_structural_chunking",
+    "top_k": 5,
+    "retrieval": "dense"
+}
