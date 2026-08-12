@@ -92,7 +92,7 @@ def resolve_evidence_old(evidence: str, chunks: list[dict], scope: str) -> set[s
 
     return resolved_ids
 
-def resolve_evidence(evidence: str, chunks: list[dict], scope: str) -> set[str]:
+def resolve_evidence(evidence: str, chunks: list[dict], scope: str, qid: str) -> set[str]:
     """
     gt_evidence format convert into set of IDs
     file :: heading
@@ -132,7 +132,7 @@ def resolve_evidence(evidence: str, chunks: list[dict], scope: str) -> set[str]:
             resolved_ids.add(chunk.get("id"))
 
     if not resolved_ids:
-        print(f"WARNING: GT key resolved ZERO chunks: '{evidence}'")
+        print(f"WARNING: [QID: {qid}] GT key resolved ZERO chunks: '{evidence}'")
 
     return resolved_ids
 
@@ -148,13 +148,14 @@ def audit(golden: list[dict], chunks: list[dict]):
     for item in golden:
         if not item.get('answerable', True):
             continue
-        
+
+        q_id = item["id"]
         answerable_count +=1
         item_fully_resolvable = True
         scope = item.get("gt_version_scope", "any")
         evidences = item.get('gt_evidence', [])
         for evidence in evidences:
-            resolved = resolve_evidence(evidence=evidence, chunks=chunks, scope=scope)
+            resolved = resolve_evidence(evidence=evidence, chunks=chunks, scope=scope, qid=q_id)
             count = len(resolved)
             print(f"Evidence: '{evidence}' -> {count} chunks resolved")
 
@@ -195,7 +196,7 @@ def build_gt_pools(golden: list[dict], chunks: list[dict]) -> dict[str, set[str]
         
         # Unanswerable items simply have empty/no gt_evidence
         for evidence in item.get("gt_evidence", []):
-            pools[q_id].update(resolve_evidence(evidence, chunks, scope))
+            pools[q_id].update(resolve_evidence(evidence, chunks, scope, q_id))
             
     return pools
 
