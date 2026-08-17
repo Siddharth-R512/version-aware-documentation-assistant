@@ -1,0 +1,11 @@
+{
+    "name": "phase4_hybrid_bm25",
+    "top_k": 5,
+    "retrieval": "hybrid_rrf",
+    "hybrid": {
+        "dense_top_n": 50,
+        "bm25_top_n": 50,
+        "rrf_k": 60,
+        "bm25_tokenizer": "identifier_preserving"
+    }
+}
