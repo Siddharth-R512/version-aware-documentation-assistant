@@ -6,8 +6,9 @@ QDRANT_URL = "http://localhost:6333"
 def get_qdrant_client():
     return QdrantClient(url=QDRANT_URL)
 
-def fetch_all_chunks() -> list[dict]:
-    client = get_qdrant_client()
+def fetch_all_chunks(client=None) -> list[dict]:
+    if not client:
+        client = get_qdrant_client()
     points, offset = [], None
     while True:
         batch, offset = client.scroll(
