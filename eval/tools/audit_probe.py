@@ -305,6 +305,134 @@
 #             print(f"Header path: {hp}")
 #             seen_headers.add(hp)
 
+# import sys
+# from pathlib import Path
+# import argparse
+
+# PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# if str(PROJECT_ROOT) not in sys.path:
+#     sys.path.insert(0, str(PROJECT_ROOT))
+
+# from src.config import get_qdrant_client, fetch_all_chunks
+# from eval.run import resolve_evidence, load_golden
+# from src.bm25_index import build_bm25_index, tokenize_identifier_preserving
+
+
+# def main():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument(
+#         "--qid",
+#         required=True,
+#         help="Question ID, e.g, q001"
+#     )
+#     args = parser.parse_args()
+
+#     client = get_qdrant_client()
+#     chunks = fetch_all_chunks(client=client)
+#     golden_path = PROJECT_ROOT / "eval" / "golden.jsonl"
+
+#     import tiktoken
+#     enc = tiktoken.get_encoding("cl100k_base")
+
+#     c = next(ch for ch in chunks if ch["id"] == "v2::pydantic/config.py::ConfigDict::000")
+#     toks = enc.encode(c["text"])
+#     print(len(toks))
+
+#     lost = enc.decode(toks[8191:])
+#     print("--- DISCARDED TAIL, 1424 tokens ---")
+#     print(lost)
+
+#     for term in ["url_preserve_empty_path", "polymorphic_serialization", "cache_strings"]:
+#         hits = [ch["id"] for ch in chunks if term in ch["text"]]
+#         print(f"{term:<30} {len(hits):>3}  {hits[:5]}")
+#         enc_i = len(enc.encode(c["text"][:c["text"].index(term)]))
+#         print(f"first occurrence at token {enc_i} of {len(toks)}  (limit 8191)")
+#     sys.exit(0)
+
+#     golden = load_golden(golden_path)
+#     item = next((g for g in golden if g["id"] == args.qid), None)
+#     if item is None:
+#         raise ValueError(f"QID NOT FOUND in golden.jsonl: {args.qid}")
+
+#     print("=" * 80)
+#     print(f"QID:      {args.qid}")
+#     print(f"QUESTION: {item['question']}")
+#     print(f"SCOPE:    {item['gt_version_scope']}")
+#     print("=" * 80)
+
+#     # ---- resolve, per key, never pooled ----
+#     resolved_evidence = {}
+#     for ev in item['gt_evidence']:
+#         resolved_evidence[ev] = resolve_evidence(
+#             ev, chunks=chunks, scope=item['gt_version_scope'], qid=args.qid
+#         )
+
+#     for ev, ids in resolved_evidence.items():
+#         print(f"\nEVIDENCE KEY: {ev}")
+#         print(f"  resolved: {len(ids)}")
+#         for cid in sorted(ids):
+#             print(f"    {cid}")
+
+#     # ---- index ----
+#     index = build_bm25_index(chunks=chunks)
+#     corpus_size = len(index.ids)
+
+#     idf_values = list(index.bm25.idf.values())
+#     print(f"\nIDF min: {min(idf_values):.6f}   IDF max: {max(idf_values):.6f}")
+#     print(f"CORPUS:  {corpus_size} chunks")
+
+#     # ---- score whole corpus, no exclusions, no cap ----
+#     question_tokens = tokenize_identifier_preserving(item['question'])
+#     print(f"\nTOKENS ({len(question_tokens)}, no dedupe): {question_tokens}")
+
+#     all_scores = index.bm25.get_scores(question_tokens)
+
+#     ranked = sorted(zip(index.ids, all_scores), key=lambda p: (-p[1], p[0]))
+#     rank_of = {cid: (i + 1, score) for i, (cid, score) in enumerate(ranked)}
+
+#     # position of each chunk_id in the parallel arrays
+#     pos_of = {cid: i for i, cid in enumerate(index.ids)}
+
+#     # per-unique-token score arrays, computed once
+#     term_scores = {}
+#     for tok in set(question_tokens):
+#         term_scores[tok] = index.bm25.get_scores([tok])
+
+#     # ---- report ----
+#     print("\n" + "=" * 80)
+#     print("BM25 REPORT (full corpus ranking, zero-scores included)")
+#     print("=" * 80)
+
+#     for ev, ids in resolved_evidence.items():
+#         print(f"\nEVIDENCE KEY: {ev}")
+#         if not ids:
+#             print("  >>> NO CHUNKS RESOLVED FOR THIS KEY <<<")
+#             continue
+
+#         for cid in sorted(ids, key=lambda c: rank_of[c][0]):
+#             rank, score = rank_of[cid]
+#             visible = (rank <= 50) and (score > 0)
+#             print("-" * 80)
+#             print(f"  {cid}")
+#             print(f"  rank {rank} of {corpus_size} | score {score:.4f} | pipeline_visible: {visible}")
+
+#             i = pos_of[cid]
+#             contribs = [(tok, term_scores[tok][i]) for tok in question_tokens]
+#             contribs.sort(key=lambda p: -p[1])
+
+#             for tok, c in contribs:
+#                 print(f"      {tok:<24} {c:.4f}")
+
+#             s = sum(c for _, c in contribs)
+#             print(f"      {'SUM':<24} {s:.4f}   (total {score:.4f}, delta {s - score:+.6f})")
+
+#     print("\n" + "=" * 80)
+
+
+# if __name__ == "__main__":
+#     main()
+
+
 import sys
 from pathlib import Path
 import argparse
@@ -318,53 +446,15 @@ from eval.run import resolve_evidence, load_golden
 from src.bm25_index import build_bm25_index, tokenize_identifier_preserving
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--qid",
-        required=True,
-        help="Question ID, e.g, q001"
-    )
-    args = parser.parse_args()
-
-    client = get_qdrant_client()
-    chunks = fetch_all_chunks(client=client)
-    golden_path = PROJECT_ROOT / "eval" / "golden.jsonl"
-
-    golden = load_golden(golden_path)
-    item = next((g for g in golden if g["id"] == args.qid), None)
-    if item is None:
-        raise ValueError(f"QID NOT FOUND in golden.jsonl: {args.qid}")
-
-    print("=" * 80)
-    print(f"QID:      {args.qid}")
-    print(f"QUESTION: {item['question']}")
-    print(f"SCOPE:    {item['gt_version_scope']}")
-    print("=" * 80)
-
-    # ---- resolve, per key, never pooled ----
-    resolved_evidence = {}
-    for ev in item['gt_evidence']:
-        resolved_evidence[ev] = resolve_evidence(
-            ev, chunks=chunks, scope=item['gt_version_scope'], qid=args.qid
-        )
-
-    for ev, ids in resolved_evidence.items():
-        print(f"\nEVIDENCE KEY: {ev}")
-        print(f"  resolved: {len(ids)}")
-        for cid in sorted(ids):
-            print(f"    {cid}")
-
-    # ---- index ----
-    index = build_bm25_index(chunks=chunks)
+def evaluate_and_report(index, query_text, target_groups, chunks_by_id):
+    """
+    Scores the query against the full index, computing rank and term-contributions
+    specifically for the chunk IDs identified in `target_groups`.
+    """
     corpus_size = len(index.ids)
 
-    idf_values = list(index.bm25.idf.values())
-    print(f"\nIDF min: {min(idf_values):.6f}   IDF max: {max(idf_values):.6f}")
-    print(f"CORPUS:  {corpus_size} chunks")
-
     # ---- score whole corpus, no exclusions, no cap ----
-    question_tokens = tokenize_identifier_preserving(item['question'])
+    question_tokens = tokenize_identifier_preserving(query_text)
     print(f"\nTOKENS ({len(question_tokens)}, no dedupe): {question_tokens}")
 
     all_scores = index.bm25.get_scores(question_tokens)
@@ -385,8 +475,12 @@ def main():
     print("BM25 REPORT (full corpus ranking, zero-scores included)")
     print("=" * 80)
 
-    for ev, ids in resolved_evidence.items():
-        print(f"\nEVIDENCE KEY: {ev}")
+    print("\nTOP 5 CHUNKS OVERALL:")
+    for cid, s in ranked[:5]:
+        print(f"  {s:.4f}  {cid}")
+
+    for group_label, ids in target_groups.items():
+        print(f"\n{group_label}")
         if not ids:
             print("  >>> NO CHUNKS RESOLVED FOR THIS KEY <<<")
             continue
@@ -394,9 +488,13 @@ def main():
         for cid in sorted(ids, key=lambda c: rank_of[c][0]):
             rank, score = rank_of[cid]
             visible = (rank <= 50) and (score > 0)
+            
+            chunk_text = chunks_by_id[cid]["text"]
+            tok_len = len(tokenize_identifier_preserving(chunk_text))
+
             print("-" * 80)
             print(f"  {cid}")
-            print(f"  rank {rank} of {corpus_size} | score {score:.4f} | pipeline_visible: {visible}")
+            print(f"  rank {rank} of {corpus_size} | score {score:.4f} | len {tok_len} | pipeline_visible: {visible}")
 
             i = pos_of[cid]
             contribs = [(tok, term_scores[tok][i]) for tok in question_tokens]
@@ -411,5 +509,133 @@ def main():
     print("\n" + "=" * 80)
 
 
+def main():
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--qid",
+        help="Question ID, e.g, q001"
+    )
+    group.add_argument(
+        "--query",
+        help="Arbitrary query text to evaluate against specific targets"
+    )
+    
+    parser.add_argument(
+        "--target-id",
+        nargs="+",
+        help="Target chunk IDs to probe (required with --query)"
+    )
+    args = parser.parse_args()
+
+    # Manual enforcement of conditional dependencies
+    if args.query and not args.target_id:
+        parser.error("--target-id is required when using --query")
+    if args.target_id and not args.query:
+        parser.error("--query is required when using --target-id")
+
+    client = get_qdrant_client()
+    chunks = fetch_all_chunks(client=client)
+    chunks_by_id = {c["id"]: c for c in chunks}
+    
+    # ---- index ----
+    index = build_bm25_index(chunks=chunks)
+    
+    # Protect against typos masquerading as 0-scores
+    if args.target_id:
+        index_ids_set = set(index.ids)
+        for tid in args.target_id:
+            if tid not in index_ids_set:
+                raise ValueError(f"Target ID not found in index: {tid}")
+
+    # Set up arguments for the shared scoring routine
+    if args.qid:
+        golden_path = PROJECT_ROOT / "eval" / "golden.jsonl"
+        golden = load_golden(golden_path)
+        item = next((g for g in golden if g["id"] == args.qid), None)
+        if item is None:
+            raise ValueError(f"QID NOT FOUND in golden.jsonl: {args.qid}")
+
+        print("=" * 80)
+        print(f"QID:      {args.qid}")
+        print(f"QUESTION: {item['question']}")
+        print(f"SCOPE:    {item['gt_version_scope']}")
+        print("=" * 80)
+
+        resolved_evidence = {}
+        for ev in item['gt_evidence']:
+            resolved_evidence[ev] = resolve_evidence(
+                ev, chunks=chunks, scope=item['gt_version_scope'], qid=args.qid
+            )
+
+        for ev, ids in resolved_evidence.items():
+            print(f"\nEVIDENCE KEY: {ev}")
+            print(f"  resolved: {len(ids)}")
+            for cid in sorted(ids):
+                print(f"    {cid}")
+
+        query_text = item['question']
+        target_groups = {f"EVIDENCE KEY: {ev}": ids for ev, ids in resolved_evidence.items()}
+        
+    else:
+        print("=" * 80)
+        print(f"CUSTOM QUERY: {args.query}")
+        print(f"TARGETS:      {len(args.target_id)} chunk(s)")
+        print("=" * 80)
+        
+        query_text = args.query
+        target_groups = {"TARGET CHUNKS": args.target_id}
+
+    idf_values = list(index.bm25.idf.values())
+    print(f"\nIDF min: {min(idf_values):.6f}   IDF max: {max(idf_values):.6f}")
+    print(f"CORPUS:  {len(index.ids)} chunks")
+
+    # Delegate to the shared evaluation logic
+    evaluate_and_report(index, query_text, target_groups, chunks_by_id)
+
+
 if __name__ == "__main__":
     main()
+
+# import sys
+# from pathlib import Path
+
+# PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# if str(PROJECT_ROOT) not in sys.path:
+#     sys.path.insert(0, str(PROJECT_ROOT))
+
+# import tiktoken
+# from src.config import get_qdrant_client, fetch_all_chunks
+# from src.bm25_index import build_bm25_index, tokenize_identifier_preserving
+
+# def main():
+#     client = get_qdrant_client()
+#     chunks = fetch_all_chunks(client=client)
+#     chunks_by_id = {c["id"]: c for c in chunks}
+    
+#     c = chunks_by_id["v2::pydantic/config.py::ConfigDict::000"]
+#     enc = tiktoken.get_encoding("cl100k_base")
+
+#     print("=" * 80)
+#     print("TOKENIZER LENGTH CHECK")
+#     print("=" * 80)
+#     print(f"chars:    {len(c['text'])}")
+#     print(f"mine:     {len(tokenize_identifier_preserving(c['text']))}")
+#     print(f"tiktoken: {len(enc.encode(c['text']))}")
+
+#     print("\n" + "=" * 80)
+#     print("RANK 1 MYSTERY: 'url_preserve_empty_path cache_strings'")
+#     print("=" * 80)
+    
+#     index = build_bm25_index(chunks=chunks)
+#     question_tokens = tokenize_identifier_preserving("url_preserve_empty_path cache_strings")
+#     all_scores = index.bm25.get_scores(question_tokens)
+
+#     ranked = sorted(zip(index.ids, all_scores), key=lambda p: (-p[1], p[0]))
+
+#     print("Top 5 Overall:")
+#     for cid, s in ranked[:5]:
+#         print(f"  {s:.4f}  {cid}")
+
+# if __name__ == "__main__":
+#     main()
