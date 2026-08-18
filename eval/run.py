@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]   # ..\Sid-Projects\version-a
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import COLLECTION_NAME, get_qdrant_client
+from src.config import COLLECTION_NAME, get_qdrant_client, fetch_all_chunks
 from src.retrieve import retrieve
 
 def _normalize(text: str) -> str:
@@ -35,24 +35,6 @@ def load_config(path: str) -> dict:
     path_w = Path(path)
     with path_w.open("r", encoding='utf-8') as f:
         return json.load(f)
-    
-def fetch_all_chunks(client) -> list[dict]:
-    # client = get_qdrant_client()
-    points, offset = [], None
-    while True:
-        batch, offset = client.scroll(
-            collection_name=COLLECTION_NAME,
-            limit=256,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False
-        )
-        points.extend(batch)
-        if offset is None:
-            break
-
-    assert len(points) == 3599, f"Expected 3599 chunks in Qdrant, found {len(points)}"
-    return [p.payload for p in points]
 
 def resolve_evidence_old(evidence: str, chunks: list[dict], scope: str) -> set[str]:
     """
