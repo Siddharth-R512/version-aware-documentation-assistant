@@ -276,32 +276,140 @@
 #     print("CRITICAL: File 'strict_mode' is entirely missing from the chunked corpus.")
 
 
+# import sys
+# from pathlib import Path
+
+# PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# if str(PROJECT_ROOT) not in sys.path:
+#     sys.path.insert(0, str(PROJECT_ROOT))
+
+# from src.config import get_qdrant_client, fetch_all_chunks
+
+# client = get_qdrant_client()
+# chunks = fetch_all_chunks(client=client)
+
+# print("=== CLASS C: main.py headers ===")
+# targets = ["def model_dump(", "def model_copy(", "def model_rebuild("]
+# for c in chunks:
+#     if c.get("source_file") == "pydantic/main.py":
+#         text = c.get("text", "")
+#         if any(t in text for t in targets):
+#             print(f"ID: {c.get('id')} | Header path: {c.get('header_path')}")
+
+# print("\n=== CLASS D: strict_mode.md headers ===")
+# seen_headers = set()
+# for c in chunks:
+#     if c.get("source_file") == "docs/concepts/strict_mode.md":
+#         hp = str(c.get("header_path"))
+#         if hp not in seen_headers:
+#             print(f"Header path: {hp}")
+#             seen_headers.add(hp)
+
 import sys
 from pathlib import Path
+import argparse
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import get_qdrant_client
-from eval.run import fetch_all_chunks
+from src.config import get_qdrant_client, fetch_all_chunks
+from eval.run import resolve_evidence, load_golden
+from src.bm25_index import build_bm25_index, tokenize_identifier_preserving
 
-client = get_qdrant_client()
-chunks = fetch_all_chunks(client=client)
 
-print("=== CLASS C: main.py headers ===")
-targets = ["def model_dump(", "def model_copy(", "def model_rebuild("]
-for c in chunks:
-    if c.get("source_file") == "pydantic/main.py":
-        text = c.get("text", "")
-        if any(t in text for t in targets):
-            print(f"ID: {c.get('id')} | Header path: {c.get('header_path')}")
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--qid",
+        required=True,
+        help="Question ID, e.g, q001"
+    )
+    args = parser.parse_args()
 
-print("\n=== CLASS D: strict_mode.md headers ===")
-seen_headers = set()
-for c in chunks:
-    if c.get("source_file") == "docs/concepts/strict_mode.md":
-        hp = str(c.get("header_path"))
-        if hp not in seen_headers:
-            print(f"Header path: {hp}")
-            seen_headers.add(hp)
+    client = get_qdrant_client()
+    chunks = fetch_all_chunks(client=client)
+    golden_path = PROJECT_ROOT / "eval" / "golden.jsonl"
+
+    golden = load_golden(golden_path)
+    item = next((g for g in golden if g["id"] == args.qid), None)
+    if item is None:
+        raise ValueError(f"QID NOT FOUND in golden.jsonl: {args.qid}")
+
+    print("=" * 80)
+    print(f"QID:      {args.qid}")
+    print(f"QUESTION: {item['question']}")
+    print(f"SCOPE:    {item['gt_version_scope']}")
+    print("=" * 80)
+
+    # ---- resolve, per key, never pooled ----
+    resolved_evidence = {}
+    for ev in item['gt_evidence']:
+        resolved_evidence[ev] = resolve_evidence(
+            ev, chunks=chunks, scope=item['gt_version_scope'], qid=args.qid
+        )
+
+    for ev, ids in resolved_evidence.items():
+        print(f"\nEVIDENCE KEY: {ev}")
+        print(f"  resolved: {len(ids)}")
+        for cid in sorted(ids):
+            print(f"    {cid}")
+
+    # ---- index ----
+    index = build_bm25_index(chunks=chunks)
+    corpus_size = len(index.ids)
+
+    idf_values = list(index.bm25.idf.values())
+    print(f"\nIDF min: {min(idf_values):.6f}   IDF max: {max(idf_values):.6f}")
+    print(f"CORPUS:  {corpus_size} chunks")
+
+    # ---- score whole corpus, no exclusions, no cap ----
+    question_tokens = tokenize_identifier_preserving(item['question'])
+    print(f"\nTOKENS ({len(question_tokens)}, no dedupe): {question_tokens}")
+
+    all_scores = index.bm25.get_scores(question_tokens)
+
+    ranked = sorted(zip(index.ids, all_scores), key=lambda p: (-p[1], p[0]))
+    rank_of = {cid: (i + 1, score) for i, (cid, score) in enumerate(ranked)}
+
+    # position of each chunk_id in the parallel arrays
+    pos_of = {cid: i for i, cid in enumerate(index.ids)}
+
+    # per-unique-token score arrays, computed once
+    term_scores = {}
+    for tok in set(question_tokens):
+        term_scores[tok] = index.bm25.get_scores([tok])
+
+    # ---- report ----
+    print("\n" + "=" * 80)
+    print("BM25 REPORT (full corpus ranking, zero-scores included)")
+    print("=" * 80)
+
+    for ev, ids in resolved_evidence.items():
+        print(f"\nEVIDENCE KEY: {ev}")
+        if not ids:
+            print("  >>> NO CHUNKS RESOLVED FOR THIS KEY <<<")
+            continue
+
+        for cid in sorted(ids, key=lambda c: rank_of[c][0]):
+            rank, score = rank_of[cid]
+            visible = (rank <= 50) and (score > 0)
+            print("-" * 80)
+            print(f"  {cid}")
+            print(f"  rank {rank} of {corpus_size} | score {score:.4f} | pipeline_visible: {visible}")
+
+            i = pos_of[cid]
+            contribs = [(tok, term_scores[tok][i]) for tok in question_tokens]
+            contribs.sort(key=lambda p: -p[1])
+
+            for tok, c in contribs:
+                print(f"      {tok:<24} {c:.4f}")
+
+            s = sum(c for _, c in contribs)
+            print(f"      {'SUM':<24} {s:.4f}   (total {score:.4f}, delta {s - score:+.6f})")
+
+    print("\n" + "=" * 80)
+
+
+if __name__ == "__main__":
+    main()
