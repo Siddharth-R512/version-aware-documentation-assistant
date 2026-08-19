@@ -14,6 +14,10 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import COLLECTION_NAME, get_qdrant_client, fetch_all_chunks
 from src.retrieve import retrieve
 
+# P4 imports
+from src.hybrid import hybrid_retrieval, build_id_to_chunk_mapping
+from src.bm25_index import build_bm25_index
+
 def _normalize(text: str) -> str:
     """Helper to remove markdown backticks and ignore case for heading matches."""
     return text.lower().replace("`", "")
@@ -166,6 +170,25 @@ def retrieve_top5(question: str, config: dict) -> list[tuple[str, str]]:
     
     # Extract id and version from the payload of the Qdrant points
     return [(str(doc.payload["id"]), str(doc.payload["version"])) for doc in results]
+
+# Phase 4 evals
+def retrieve_top5_hybrid(question, config: dict, index, id_to_chunk) -> list[tuple[str, str]]:
+    if "hybrid" not in config.keys():
+        raise KeyError(f"Hybrid key not found in 'phase4_hybrid_bm25.json'")
+
+    h = config["hybrid"]
+
+    results = hybrid_retrieval(
+        query=question,
+        index=index,
+        id_to_chunk=id_to_chunk,
+        dense_top_n=h["dense_top_n"],
+        bm25_top_n=h["bm25_top_n"],
+        rrf_k=h["rrf_k"],
+        top_k=config.get("top_k", 5),
+    )
+
+    return [(str(r["chunk"]["id"]), str(r["chunk"]["version"])) for r in results]
 
 def build_gt_pools(golden: list[dict], chunks: list[dict]) -> dict[str, set[str]]:
     """Per question id: union of resolve_evidence over its gt_evidence list.
@@ -345,6 +368,10 @@ if __name__ == "__main__":
     config = load_config(args.config)
     config_name = config.get("name", "unnamed_run")
 
+    retrieval = config.get("retrieval")
+    if retrieval not in {"dense", "hybrid_rrf"}:
+        raise ValueError(f"Unknown retrieval mode: {retrieval!r} in {args.config}")
+
     # Set up paths safely
     results_dir = Path("eval/results")
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -354,6 +381,13 @@ if __name__ == "__main__":
     # Pre-build ground truth sets per item
     gt_pools = build_gt_pools(golden, chunks)
 
+    index = None
+    id_to_chunk = None
+    if retrieval == "hybrid_rrf":
+        print("Building BM25 index and id->chunk mapping...")
+        index = build_bm25_index(chunks)
+        id_to_chunk = build_id_to_chunk_mapping(chunks)
+
     # Main evaluation loop
     rows = []
     print(f"Running evaluation for config: {config_name}...")
@@ -361,7 +395,10 @@ if __name__ == "__main__":
         question_text = item.get("question", "")
         
         # Retrieve and Score
-        retrieved = retrieve_top5(question_text, config)
+        if retrieval == "dense":
+            retrieved = retrieve_top5(question_text, config)
+        else:
+            retrieved = retrieve_top5_hybrid(question_text, config, index, id_to_chunk)
         row = score_question(item, gt_pools[item["id"]], retrieved)
         rows.append(row)
 
